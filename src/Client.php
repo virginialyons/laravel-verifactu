@@ -15,6 +15,20 @@ use Vlec\Verifactu\Exceptions\VerifactuException;
 
 class Client
 {
+    protected bool $retries = true;
+
+    /**
+     * A copy of the client that sends each request once, for queued jobs,
+     * which retry through the queue instead.
+     */
+    public function withoutRetries(): static
+    {
+        $client = clone $this;
+        $client->retries = false;
+
+        return $client;
+    }
+
     /**
      * The environment the token works in, or null without a valid token.
      */
@@ -55,7 +69,7 @@ class Client
             ->connectTimeout(config()->integer('verifactu.connect_timeout'))
             ->timeout(config()->integer('verifactu.timeout'))
             ->retry(
-                times: config()->integer('verifactu.retries') + 1,
+                times: $this->attempts(),
                 sleepMilliseconds: $this->retryDelay(...),
                 when: $this->shouldRetry(...),
                 throw: false,
@@ -178,6 +192,15 @@ class Client
     {
         /** @var array<string, mixed> */
         return $body['data'];
+    }
+
+    protected function attempts(): int
+    {
+        if (! $this->retries) {
+            return 1;
+        }
+
+        return config()->integer('verifactu.retries') + 1;
     }
 
     protected function shouldRetry(Throwable $exception): bool
