@@ -15,6 +15,11 @@ it('publishes the config under the verifactu-config tag', function (): void {
         ->toContain(config_path('verifactu.php'));
 });
 
+it('publishes the batches migration under the verifactu-migrations tag', function (): void {
+    expect(ServiceProvider::pathsToPublish(VerifactuServiceProvider::class, 'verifactu-migrations'))
+        ->toContain(database_path('migrations'));
+});
+
 it('shows the environment the token works in on about', function (string $token, string $environment): void {
     config(['verifactu.token' => $token]);
 

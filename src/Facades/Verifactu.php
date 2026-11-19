@@ -11,6 +11,7 @@ use Vlec\Verifactu\Client;
 /**
  * @method static PendingRequest http()
  * @method static Client withoutRetries()
+ * @method static void sendBatch(iterable<int, \Illuminate\Database\Eloquent\Model&\Vlec\Verifactu\Contracts\VerifactuInvoice> $invoices)
  * @method static array<string, mixed> listInvoices(array<string, mixed> $query = [])
  * @method static array<string, mixed> createInvoice(array<string, mixed> $invoice, ?string $idempotencyKey = null)
  * @method static array<string, mixed> getInvoice(string $uuid)

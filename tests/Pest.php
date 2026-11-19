@@ -31,3 +31,25 @@ function serviceInvoice(array $attributes = []): array
         ...$attributes,
     ];
 }
+
+/**
+ * A batch as the service answers with it.
+ *
+ * @param  array<string, mixed>  $attributes
+ * @return array<string, mixed>
+ */
+function serviceBatch(array $attributes = []): array
+{
+    return [
+        'uuid' => '5f0c6a2e-8a5b-4c1e-9d7a-2b8e4f6a1c3d',
+        'environment' => 'test',
+        'status' => 'queued',
+        'total' => 2,
+        'processed' => 0,
+        'succeeded' => 0,
+        'failed' => 0,
+        'created_at' => '2026-11-19T10:30:00+01:00',
+        'completed_at' => null,
+        ...$attributes,
+    ];
+}

@@ -8,12 +8,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
+use Vlec\Verifactu\Jobs\ApplyInvoiceBatch;
 use Vlec\Verifactu\Jobs\RefreshInvoice;
+use Vlec\Verifactu\Models\InvoiceBatch;
 
 /**
- * Receives the service's signed deliveries. It reads nothing from an
- * invoice in the payload but its uuid: each known invoice is read again
- * from the service, so deliveries arriving late or out of order do no harm.
+ * Receives the service's signed deliveries. It reads nothing from the
+ * payload but uuids: each known invoice or batch is read again from the
+ * service, so deliveries arriving late or out of order do no harm.
  */
 class WebhookController
 {
@@ -24,7 +26,26 @@ class WebhookController
             $this->refreshInvoices(collect($request->json()->all('data'))->pluck('uuid')->all());
         }
 
+        if ($request->json('event') === 'invoice_batch.completed') {
+            $this->applyBatch($request->json('data.uuid'));
+        }
+
         return new Response;
+    }
+
+    /**
+     * Queues the batch's application, once; a batch of another app or
+     * environment is not in the table and is skipped.
+     */
+    protected function applyBatch(mixed $uuid): void
+    {
+        $batch = InvoiceBatch::firstWhere('uuid', $uuid);
+
+        if ($batch === null || $batch->isApplied()) {
+            return;
+        }
+
+        ApplyInvoiceBatch::dispatch($batch);
     }
 
     /**

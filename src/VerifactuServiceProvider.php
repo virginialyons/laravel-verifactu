@@ -28,6 +28,10 @@ class VerifactuServiceProvider extends ServiceProvider
             __DIR__.'/../config/verifactu.php' => config_path('verifactu.php'),
         ], 'verifactu-config');
 
+        $this->publishesMigrations([
+            __DIR__.'/../database/migrations' => database_path('migrations'),
+        ], 'verifactu-migrations');
+
         AboutCommand::add('Verifactu', fn (Client $client): array => [
             'URL' => config('verifactu.url') ?? 'Not set',
             'Environment' => $client->environment()->name ?? 'Unknown',

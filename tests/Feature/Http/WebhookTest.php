@@ -12,8 +12,11 @@ use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Vlec\Verifactu\Http\Middleware\VerifyWebhookSignature;
+use Vlec\Verifactu\InvoiceBatchStatus;
 use Vlec\Verifactu\InvoiceStatus;
+use Vlec\Verifactu\Jobs\ApplyInvoiceBatch;
 use Vlec\Verifactu\Jobs\RefreshInvoice;
+use Vlec\Verifactu\Models\InvoiceBatch;
 use Workbench\App\Models\Invoice;
 
 uses(RefreshDatabase::class);
@@ -35,6 +38,16 @@ function webhookBody(string $event = 'invoices.updated', array $uuids = []): str
         'environment' => 'test',
         'created_at' => '2026-11-19T10:31:05.123+01:00',
         'data' => collect($uuids)->map(fn (string $uuid): array => serviceInvoice(['uuid' => $uuid, 'qr_code' => null]))->all(),
+    ], JSON_PRETTY_PRINT);
+}
+
+function batchWebhookBody(string $uuid): string
+{
+    return (string) json_encode([
+        'event' => 'invoice_batch.completed',
+        'environment' => 'test',
+        'created_at' => '2026-11-19T10:32:10.123+01:00',
+        'data' => serviceBatch(['uuid' => $uuid, 'status' => 'completed', 'processed' => 2, 'succeeded' => 2]),
     ], JSON_PRETTY_PRINT);
 }
 
@@ -128,6 +141,31 @@ it('reads the body as JSON whatever its Content-Type', function (): void {
 
     Queue::assertPushed(RefreshInvoice::class);
 });
+
+it('queues the application of a known batch once on invoice_batch.completed', function (): void {
+    Queue::fake();
+    $batch = InvoiceBatch::create(['uuid' => 'a-batch', 'status' => InvoiceBatchStatus::Queued]);
+    $body = batchWebhookBody('a-batch');
+
+    postWebhook($body, webhookSignature($body))->assertOk();
+    postWebhook($body, webhookSignature($body))->assertOk();
+
+    Queue::assertPushedTimes(ApplyInvoiceBatch::class, 1);
+    Queue::assertPushed(ApplyInvoiceBatch::class, fn (ApplyInvoiceBatch $job): bool => $job->batch->is($batch));
+});
+
+it('queues nothing for a batch :dataset', function (Closure $batch): void {
+    Queue::fake();
+    $batch();
+    $body = batchWebhookBody('a-batch');
+
+    postWebhook($body, webhookSignature($body))->assertOk();
+
+    Queue::assertNothingPushed();
+})->with([
+    'already applied' => [fn () => InvoiceBatch::create(['uuid' => 'a-batch', 'status' => InvoiceBatchStatus::Completed])],
+    'of another app or environment' => [fn () => InvoiceBatch::create(['uuid' => 'another-batch', 'status' => InvoiceBatchStatus::Queued])],
+]);
 
 it('queues nothing for :dataset', function (string $event): void {
     Queue::fake();

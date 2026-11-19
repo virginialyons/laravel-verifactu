@@ -1,0 +1,110 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
+use Vlec\Verifactu\Client;
+use Vlec\Verifactu\Events\InvoiceNotIssued;
+use Vlec\Verifactu\Facades\Verifactu;
+use Vlec\Verifactu\InvoiceBatchStatus;
+use Vlec\Verifactu\Jobs\SendInvoiceBatch;
+use Vlec\Verifactu\Models\InvoiceBatch;
+use Workbench\App\Models\Invoice;
+
+uses(RefreshDatabase::class);
+
+/**
+ * @param  iterable<int, Invoice>  $invoices
+ */
+function sendBatchJob(iterable $invoices): SendInvoiceBatch
+{
+    $job = (new SendInvoiceBatch(Collection::make($invoices)))->withFakeQueueInteractions();
+    $job->handle(app(Client::class));
+
+    return $job;
+}
+
+it('sends the invoices as one batch once committed, and keeps the batch', function (): void {
+    config(['queue.default' => 'database']);
+    $invoices = Invoice::factory()->count(2)->create();
+    Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::response(['data' => serviceBatch()], 202)]);
+
+    DB::transaction(function () use ($invoices): void {
+        Verifactu::sendBatch($invoices);
+
+        expect(DB::table('jobs')->count())->toBe(0);
+    });
+
+    $this->artisan('queue:work', ['--once' => true])->assertSuccessful();
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && collect($request['invoices'])->pluck('external_reference')->all() === ["invoice:{$invoices[0]->id}", "invoice:{$invoices[1]->id}"]
+        && str_starts_with($request->header('Idempotency-Key')[0], 'batch:'));
+    expect(InvoiceBatch::sole())
+        ->uuid->toBe('5f0c6a2e-8a5b-4c1e-9d7a-2b8e4f6a1c3d')
+        ->status->toBe(InvoiceBatchStatus::Queued);
+});
+
+it('leaves out invoices already on Verifactu, and queues nothing when none is left', function (): void {
+    Queue::fake();
+    $issued = Invoice::factory()->issued()->create();
+    $new = Invoice::factory()->create();
+
+    Verifactu::sendBatch([$issued]);
+
+    Queue::assertNothingPushed();
+
+    Verifactu::sendBatch([$issued, $new]);
+
+    Queue::assertPushed(SendInvoiceBatch::class, fn (SendInvoiceBatch $job): bool => $job->invoices->modelKeys() === [$new->id]);
+});
+
+it('keeps one Idempotency-Key across the retries of a send, and gives a later send a new one', function (): void {
+    $invoices = Invoice::factory()->count(2)->create();
+    Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::sequence()
+        ->push(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '7'])
+        ->push(['data' => serviceBatch()], 202)]);
+
+    $job = sendBatchJob($invoices)->assertReleased(7);
+    $job->withFakeQueueInteractions()->handle(app(Client::class));
+
+    $keys = Http::recorded()->map(fn (array $pair): array => $pair[0]->header('Idempotency-Key'))->unique();
+    expect($keys->all())->toBe([[$job->idempotencyKey]])
+        ->and($job->idempotencyKey)->toStartWith('batch:')
+        ->and((new SendInvoiceBatch($invoices))->idempotencyKey)->not->toBe($job->idempotencyKey)
+        ->and(InvoiceBatch::count())->toBe(1);
+});
+
+it('is released to store the batch on the retry when the database fails after the service took it', function (): void {
+    $invoices = Invoice::factory()->count(2)->create();
+    Event::fake([InvoiceNotIssued::class]);
+    Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::response(['data' => serviceBatch()], 202)]);
+    Schema::drop('verifactu_invoice_batches');
+
+    sendBatchJob($invoices)->assertReleased(10);
+
+    Event::assertNotDispatched(InvoiceNotIssued::class);
+});
+
+it('fails on a refusal and fires InvoiceNotIssued for each invoice', function (): void {
+    config(['queue.default' => 'database']);
+    $invoices = Invoice::factory()->count(2)->create();
+    Event::fake([InvoiceNotIssued::class]);
+    Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::response(['message' => 'The invoices field is required.', 'code' => 'validation_failed'], 422)]);
+
+    Verifactu::sendBatch($invoices);
+    $this->artisan('queue:work', ['--once' => true]);
+
+    expect(DB::table('failed_jobs')->count())->toBe(1)
+        ->and(InvoiceBatch::count())->toBe(0);
+    Event::assertDispatchedTimes(InvoiceNotIssued::class, 2);
+    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1])
+        && $event->errorCode === 'validation_failed');
+});

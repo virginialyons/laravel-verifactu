@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Vlec\Verifactu;
 
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
@@ -11,7 +13,9 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Throwable;
+use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\Exceptions\VerifactuException;
+use Vlec\Verifactu\Jobs\SendInvoiceBatch;
 
 class Client
 {
@@ -74,6 +78,27 @@ class Client
                 when: $this->shouldRetry(...),
                 throw: false,
             );
+    }
+
+    /**
+     * Issues the invoices as one batch from a queued job, once the database
+     * transaction around this call commits. Invoices already on Verifactu
+     * are left out. Each one fires InvoiceIssued or InvoiceNotIssued when
+     * the batch completes.
+     *
+     * @param  iterable<int, Model&VerifactuInvoice>  $invoices
+     */
+    public function sendBatch(iterable $invoices): void
+    {
+        $invoices = Collection::make($invoices)
+            ->reject(fn (Model&VerifactuInvoice $invoice): bool => $invoice->isOnVerifactu())
+            ->values();
+
+        if ($invoices->isEmpty()) {
+            return;
+        }
+
+        SendInvoiceBatch::dispatch($invoices);
     }
 
     /**
