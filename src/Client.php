@@ -170,6 +170,25 @@ class Client
     }
 
     /**
+     * Asks AEAT whether it knows the Spanish tax ID under this name.
+     */
+    public function checkTaxId(string $taxId, string $name): TaxIdCheck
+    {
+        /** @var array{result: string, official_name: string|null} $check */
+        $check = $this->data($this->send('POST', 'tax-id-checks', [
+            'json' => ['tax_id' => $taxId, 'name' => $name],
+        ]));
+
+        $result = TaxIdCheckResult::tryFrom($check['result']);
+
+        if ($result === null) {
+            throw new VerifactuException("The service answered an unknown tax-ID check result: {$check['result']}.");
+        }
+
+        return new TaxIdCheck($result, $check['official_name']);
+    }
+
+    /**
      * Sends a POST with an Idempotency-Key, a new UUID unless one is given,
      * so the automatic retries never act twice.
      *

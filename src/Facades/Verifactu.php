@@ -7,6 +7,7 @@ namespace Vlec\Verifactu\Facades;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Facade;
 use Vlec\Verifactu\Client;
+use Vlec\Verifactu\TaxIdCheck;
 
 /**
  * @method static PendingRequest http()
@@ -20,6 +21,7 @@ use Vlec\Verifactu\Client;
  * @method static array<string, mixed> createInvoiceBatch(array<string, mixed> $batch, ?string $idempotencyKey = null)
  * @method static array<string, mixed> getInvoiceBatch(string $uuid)
  * @method static array<string, mixed> listInvoiceBatchItems(string $uuid, int $page = 1)
+ * @method static TaxIdCheck checkTaxId(string $taxId, string $name)
  *
  * @see Client
  */

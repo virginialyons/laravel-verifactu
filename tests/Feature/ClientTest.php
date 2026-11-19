@@ -10,6 +10,7 @@ use Illuminate\Support\Sleep;
 use Illuminate\Support\Str;
 use Vlec\Verifactu\Exceptions\VerifactuException;
 use Vlec\Verifactu\Facades\Verifactu;
+use Vlec\Verifactu\TaxIdCheckResult;
 
 $invoice = ['description' => 'Order 1', 'total_amount' => '12.10'];
 
@@ -59,6 +60,23 @@ it('returns the resource of a single answer and the whole page of a list', funct
 
     expect(Verifactu::getInvoice('uuid-1'))->toBe(['uuid' => 'uuid-1'])
         ->and(Verifactu::listInvoices())->toBe(['data' => [['uuid' => 'uuid-1']], 'meta' => ['total' => 1]]);
+});
+
+it('checks a tax ID without an Idempotency-Key and returns AEAT\'s answer', function (): void {
+    Http::fake(['verifactu.test/api/v1/tax-id-checks' => Http::response(['data' => [
+        'tax_id' => 'A15022510',
+        'result' => 'similar',
+        'official_name' => 'ACME SOCIEDAD LIMITADA',
+    ]])]);
+
+    $check = Verifactu::checkTaxId('A15022510', 'Acme S.L.');
+
+    expect($check->result)->toBe(TaxIdCheckResult::Similar)
+        ->and($check->officialName)->toBe('ACME SOCIEDAD LIMITADA');
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://verifactu.test/api/v1/tax-id-checks'
+        && $request->data() === ['tax_id' => 'A15022510', 'name' => 'Acme S.L.']
+        && ! $request->hasHeader('Idempotency-Key'));
 });
 
 it('sends the Idempotency-Key it is given', function (): void {
