@@ -1,0 +1,25 @@
+{
+    "slug": "simplified-credit-note",
+    "title": "Credit note for a simplified invoice",
+    "description": "The first step of exchanging a simplified invoice for a full one (factura de canje): a negative simplified invoice (F2) that cancels it out.",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura de canje, opci\u00f3n 1: abono de la simplificada",
+            "invoice_type": "F2",
+            "lines": [
+                {
+                    "tax_base": "-200",
+                    "operation_qualification": "S1",
+                    "tax_rate": "21",
+                    "tax_amount": "-42"
+                }
+            ],
+            "total_amount": "-242"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

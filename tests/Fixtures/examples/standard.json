@@ -1,0 +1,28 @@
+{
+    "slug": "standard",
+    "title": "Standard invoice",
+    "description": "A full invoice (factura completa, F1) to a Spanish business, with one line at 21% VAT.",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura normal",
+            "recipient": {
+                "tax_id": "A15022510",
+                "name": "Nombre destinatario"
+            },
+            "lines": [
+                {
+                    "tax_base": "200",
+                    "operation_qualification": "S1",
+                    "tax_rate": "21",
+                    "tax_amount": "42"
+                }
+            ],
+            "total_amount": "242"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

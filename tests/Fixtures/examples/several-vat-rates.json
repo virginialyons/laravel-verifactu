@@ -1,0 +1,34 @@
+{
+    "slug": "several-vat-rates",
+    "title": "Invoice with several VAT rates",
+    "description": "A full invoice (F1) with one tax line per VAT rate (factura con varios tipos de IVA).",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura con varios IVAs",
+            "recipient": {
+                "tax_id": "A15022510",
+                "name": "Nombre destinatario"
+            },
+            "lines": [
+                {
+                    "tax_base": "200",
+                    "operation_qualification": "S1",
+                    "tax_rate": "21",
+                    "tax_amount": "42"
+                },
+                {
+                    "tax_base": "100",
+                    "operation_qualification": "S1",
+                    "tax_rate": "10",
+                    "tax_amount": "10"
+                }
+            ],
+            "total_amount": "352"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

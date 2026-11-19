@@ -27,6 +27,27 @@ return [
     'model' => 'App\Models\Invoice',
 
     /*
+     * The columns of the invoice model's table that hold the service's
+     * answer. invoice_number is the number to print (series and number);
+     * number is the bare number a corrective invoice refers to.
+     */
+    'columns' => [
+        'uuid' => 'verifactu_uuid',
+        'status' => 'verifactu_status',
+        'invoice_number' => 'verifactu_invoice_number',
+        'number' => 'verifactu_number',
+        'issue_date' => 'verifactu_issue_date',
+        'verification_url' => 'verifactu_url',
+        'qr_code' => 'qr_code',
+    ],
+
+    /*
+     * The exemption reason of TaxLine::exempt() when none is given:
+     * E1, exempt under article 20 of the VAT law (education, health...).
+     */
+    'exemption_reason' => 'E1',
+
+    /*
      * The path the service posts its webhooks to.
      */
     'webhook_path' => 'verifactu/webhook',

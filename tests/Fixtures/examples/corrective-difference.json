@@ -1,0 +1,38 @@
+{
+    "slug": "corrective-difference",
+    "title": "Corrective invoice for the difference",
+    "description": "A corrective invoice for the difference (rectificativa por diferencias, R1\u2013R4 with correction method difference): its amounts are the change, here a lower base.",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Rectificaci\u00f3n por diferencias (cambio de base)",
+            "invoice_type": "R4",
+            "recipient": {
+                "tax_id": "A15022510",
+                "name": "Nombre destinatario"
+            },
+            "lines": [
+                {
+                    "tax_base": "-500",
+                    "operation_qualification": "S1",
+                    "tax_rate": "21",
+                    "tax_amount": "-105"
+                }
+            ],
+            "total_amount": "-605",
+            "correction": {
+                "method": "difference",
+                "corrected_invoices": [
+                    {
+                        "number": "A-1",
+                        "issue_date": "2025-04-07"
+                    }
+                ]
+            }
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

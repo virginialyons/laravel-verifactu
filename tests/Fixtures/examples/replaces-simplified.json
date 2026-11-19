@@ -1,0 +1,35 @@
+{
+    "slug": "replaces-simplified",
+    "title": "Full invoice replacing simplified ones",
+    "description": "A full invoice that replaces earlier simplified invoices (factura sustitutiva de simplificadas, F3), listed in replaced_invoices.",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura de canje, opci\u00f3n 2: sustitutiva (F3)",
+            "invoice_type": "F3",
+            "recipient": {
+                "tax_id": "A15022510",
+                "name": "Nombre destinatario"
+            },
+            "lines": [
+                {
+                    "tax_base": "200",
+                    "operation_qualification": "S1",
+                    "tax_rate": "21",
+                    "tax_amount": "42"
+                }
+            ],
+            "replaced_invoices": [
+                {
+                    "number": "S-1",
+                    "issue_date": "2026-10-02"
+                }
+            ],
+            "total_amount": "242"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

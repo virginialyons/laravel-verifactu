@@ -1,0 +1,31 @@
+{
+    "slug": "simplified",
+    "title": "Simplified invoice",
+    "description": "A simplified invoice (factura simplificada, F2): no recipient, at most 3,000.00.",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura simplificada",
+            "invoice_type": "F2",
+            "lines": [
+                {
+                    "tax_base": "200",
+                    "operation_qualification": "S1",
+                    "tax_rate": "21",
+                    "tax_amount": "42"
+                },
+                {
+                    "tax_base": "100",
+                    "operation_qualification": "S1",
+                    "tax_rate": "10",
+                    "tax_amount": "10"
+                }
+            ],
+            "total_amount": "352"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}
