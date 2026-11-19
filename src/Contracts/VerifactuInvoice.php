@@ -28,6 +28,11 @@ interface VerifactuInvoice
     public function isOnVerifactu(): bool;
 
     /**
+     * The invoice's id on the service; throws before it is issued.
+     */
+    public function verifactuUuid(): string;
+
+    /**
      * The app's id for the sale on the service: "invoice:{key}".
      */
     public function verifactuReference(): string;

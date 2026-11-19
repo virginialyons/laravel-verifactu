@@ -3,6 +3,7 @@ parameters:
     paths:
         - src
         - config
+        - routes
         - workbench/app
     configDirectories:
         - config

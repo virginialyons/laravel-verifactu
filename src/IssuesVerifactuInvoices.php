@@ -131,7 +131,7 @@ trait IssuesVerifactuInvoices
         };
     }
 
-    protected function verifactuUuid(): string
+    public function verifactuUuid(): string
     {
         $uuid = $this->getAttribute(static::verifactuColumn('uuid'));
 
