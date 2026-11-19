@@ -27,3 +27,4 @@ Append; never delete a row. One row per finding, with a stable ID (`F001`, `F002
 
 | ID  | Sev | Found | Milestone | Area | Finding | Status | Notes |
 | --- | --- | ----- | --------- | ---- | ------- | ------ | ----- |
+| F001 | P3 | 2026-11-19 | 0.1.0 | Issuing | Two databases on one token both start at `invoice:1` (two developers, or `migrate:fresh`), so `IssueInvoice`'s `409 external_reference_already_used` recovery stores the other database's invoice and fires `InvoiceIssued`. | open | T4 review. Fix in T10: the README tells apps to give each database its own app and token on the service. |

@@ -21,7 +21,7 @@ it('shows the environment the token works in on about', function (string $token,
     $this->artisan('about', ['--only' => 'verifactu'])
         ->expectsOutputToContain($environment)
         ->expectsOutputToContain('https://verifactu.test')
-        ->expectsOutputToContain('App\Models\Invoice')
+        ->expectsOutputToContain('Workbench\App\Models\Invoice')
         ->expectsOutputToContain('verifactu/webhook')
         ->assertSuccessful();
 })->with([

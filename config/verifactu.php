@@ -53,6 +53,11 @@ return [
     'webhook_path' => 'verifactu/webhook',
 
     /*
+     * The queue the package's jobs run on; null for the default queue.
+     */
+    'queue' => null,
+
+    /*
      * How many times a call is retried after a connection error, a 429,
      * a 5xx or a 409 idempotency_key_in_progress, with the same
      * Idempotency-Key. Queued jobs retry through the queue instead.

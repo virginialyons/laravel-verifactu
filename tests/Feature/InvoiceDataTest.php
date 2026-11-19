@@ -3,13 +3,12 @@
 declare(strict_types=1);
 
 use BcMath\Number;
-use Illuminate\Database\Eloquent\Model;
-use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\ExemptionReason;
 use Vlec\Verifactu\ForeignIdType;
 use Vlec\Verifactu\InvoiceData;
 use Vlec\Verifactu\Recipient;
 use Vlec\Verifactu\TaxLine;
+use Workbench\App\Models\Invoice;
 
 /**
  * The request body of one of the service's tested examples, with its
@@ -40,29 +39,17 @@ function withTwoDecimals(array $body): array
 }
 
 /**
- * An app's invoice the service has already issued.
+ * An app's invoice the service has already issued, not saved.
  */
-function issuedInvoice(string $number, string $issueDate, bool $simplified = false): Model&VerifactuInvoice
+function issuedInvoice(string $number, string $issueDate, bool $simplified = false): Invoice
 {
-    $invoice = new class extends Model implements VerifactuInvoice
-    {
-        public bool $simplified = false;
+    $factory = Invoice::factory()->issued($number, $issueDate);
 
-        public function toVerifactu(): InvoiceData
-        {
-            $data = InvoiceData::make('Original sale');
+    if ($simplified) {
+        $factory = $factory->simplified();
+    }
 
-            if ($this->simplified) {
-                return $data->simplified();
-            }
-
-            return $data;
-        }
-    };
-
-    $invoice->simplified = $simplified;
-
-    return $invoice->forceFill(['verifactu_number' => $number, 'verifactu_issue_date' => $issueDate]);
+    return $factory->make();
 }
 
 $business = Recipient::spanish('A15022510', 'Nombre destinatario');
@@ -100,8 +87,9 @@ it('corrects a simplified invoice with an R5', function (): void {
 });
 
 it('reads the referenced invoice from the configured columns, with a Carbon date', function (): void {
-    config(['verifactu.columns.number' => 'short_number', 'verifactu.columns.issue_date' => 'issued_on']);
-    $original = issuedInvoice('', '')->forceFill(['short_number' => '42', 'issued_on' => now()->setDate(2026, 11, 18)]);
+    $original = issuedInvoice('42', '2026-11-18');
+
+    expect($original->issued_on)->toBeInstanceOf(DateTimeInterface::class);
 
     $data = InvoiceData::make('Refund')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(-1000, rate: 21)])->correcting($original);
 
@@ -109,7 +97,7 @@ it('reads the referenced invoice from the configured columns, with a Carbon date
 });
 
 it('refuses to correct an invoice the service has not issued', function (): void {
-    $original = issuedInvoice('42', '2026-11-18')->forceFill(['verifactu_number' => null]);
+    $original = Invoice::factory()->make();
 
     expect(fn () => InvoiceData::make('Refund')->correcting($original))
         ->toThrow(InvalidArgumentException::class, 'An invoice must be issued on Verifactu before it is corrected or replaced.');
