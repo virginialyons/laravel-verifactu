@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Vlec\Verifactu\Jobs;
 
-use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
@@ -13,6 +12,7 @@ use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Vlec\Verifactu\Client;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\Exceptions\VerifactuException;
+use Vlec\Verifactu\Jobs\Concerns\RetriesThroughTheQueue;
 
 /**
  * Reads an invoice from the service and stores it. Unique only while
@@ -22,23 +22,12 @@ use Vlec\Verifactu\Exceptions\VerifactuException;
 class RefreshInvoice implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
     use Queueable;
-
-    /**
-     * Any exception the job does not release fails it at once.
-     */
-    public int $maxExceptions = 1;
+    use RetriesThroughTheQueue;
 
     /**
      * A lock left by a job that was lost while queued expires within the hour.
      */
     public int $uniqueFor = 3600;
-
-    /**
-     * Seconds to wait before the next attempt, when the service gives no Retry-After.
-     *
-     * @var list<int>
-     */
-    public array $releaseDelays = [10, 30, 60, 300];
 
     public function __construct(public Model&VerifactuInvoice $invoice)
     {
@@ -65,21 +54,12 @@ class RefreshInvoice implements ShouldBeUniqueUntilProcessing, ShouldQueue
         return [(new WithoutOverlapping($this->invoice->verifactuReference()))->releaseAfter(5)->expireAfter(60)];
     }
 
-    public function retryUntil(): DateTimeInterface
-    {
-        return now()->addDay();
-    }
-
     public function handle(Client $client): void
     {
         try {
             $invoice = $client->withoutRetries()->getInvoice($this->invoice->verifactuUuid());
         } catch (VerifactuException $exception) {
-            if (! $exception->isRetryable()) {
-                throw $exception;
-            }
-
-            $this->release($exception->retryAfter ?? $this->releaseDelays[min($this->attempts(), count($this->releaseDelays)) - 1]);
+            $this->releaseOrFail($exception);
 
             return;
         }

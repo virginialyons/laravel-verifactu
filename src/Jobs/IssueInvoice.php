@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Vlec\Verifactu\Jobs;
 
-use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
@@ -17,6 +16,7 @@ use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\Events\InvoiceIssued;
 use Vlec\Verifactu\Events\InvoiceNotIssued;
 use Vlec\Verifactu\Exceptions\VerifactuException;
+use Vlec\Verifactu\Jobs\Concerns\RetriesThroughTheQueue;
 
 /**
  * Issues one invoice. Each attempt sends one request with the same
@@ -25,24 +25,13 @@ use Vlec\Verifactu\Exceptions\VerifactuException;
 class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommit
 {
     use Queueable;
-
-    /**
-     * Any exception the job does not release fails it at once.
-     */
-    public int $maxExceptions = 1;
+    use RetriesThroughTheQueue;
 
     /**
      * The lock against a second job for the invoice outlasts the 24 hours
      * of retries; a job lost while holding it never blocks the invoice.
      */
     public int $uniqueFor = 90000;
-
-    /**
-     * Seconds to wait before the next attempt, when the service gives no Retry-After.
-     *
-     * @var list<int>
-     */
-    public array $releaseDelays = [10, 30, 60, 300];
 
     /**
      * One key per send, kept across this job's retries. A later send gets a
@@ -67,14 +56,6 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
         return $this->invoice->verifactuReference();
     }
 
-    /**
-     * The service replays an Idempotency-Key for 24 hours.
-     */
-    public function retryUntil(): DateTimeInterface
-    {
-        return now()->addDay();
-    }
-
     public function handle(Client $client): void
     {
         if ($this->invoice->isOnVerifactu()) {
@@ -84,11 +65,7 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
         try {
             $invoice = $this->issue($client->withoutRetries());
         } catch (VerifactuException $exception) {
-            if (! $exception->isRetryable()) {
-                throw $exception;
-            }
-
-            $this->release($exception->retryAfter ?? $this->releaseDelays[min($this->attempts(), count($this->releaseDelays)) - 1]);
+            $this->releaseOrFail($exception);
 
             return;
         }
