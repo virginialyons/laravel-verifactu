@@ -50,7 +50,7 @@ Status: `Pending` · `Planning` · `Building` · `Review` · `Done` · `Blocked`
 
 ## Current position
 
-**`0.1.0` building (2026-11-19).** Plan approved by the owner on 2026-11-19, with its decomplex review folded in ([0.1.0-laravel-package-decomplex.md](../.reviews/0.1.0-laravel-package-decomplex.md)). T1 in progress. **Next:** `implement-plan` T2, from a session opened in this folder.
+**`0.1.0` building (2026-11-19).** Plan approved by the owner on 2026-11-19, with its decomplex review folded in ([0.1.0-laravel-package-decomplex.md](../.reviews/0.1.0-laravel-package-decomplex.md)). T1 verified (scaffold, workflow, skills, public repo). **Next:** `implement-plan` T2, from a session opened in this folder.
 
 ---
 
