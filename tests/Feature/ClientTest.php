@@ -8,7 +8,6 @@ use Illuminate\Http\Client\ResponseSequence;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use Illuminate\Support\Str;
-use InvalidArgumentException;
 use Vlec\Verifactu\Exceptions\VerifactuException;
 use Vlec\Verifactu\Facades\Verifactu;
 
