@@ -50,7 +50,7 @@ Status: `Pending` · `Planning` · `Building` · `Review` · `Done` · `Blocked`
 
 ## Current position
 
-**`0.1.0` building (2026-11-19).** Plan approved by the owner on 2026-11-19, with its decomplex review folded in ([0.1.0-laravel-package-decomplex.md](../.reviews/0.1.0-laravel-package-decomplex.md)). T1 verified (scaffold, workflow, skills, public repo). **Next:** `implement-plan` T2, from a session opened in this folder.
+**`0.1.0` building (2026-11-19).** Plan approved by the owner on 2026-11-19, with its decomplex review folded in ([0.1.0-laravel-package-decomplex.md](../.reviews/0.1.0-laravel-package-decomplex.md)). T1–T9 verified (see the tracker). On 2026-11-19 the owner asked for an independent review of every task and a sweep to Laravel's own helpers: nine reviewers, two more rounds, all fixes in, `composer test` green (331 tests). Committed on 2026-11-20 at the owner's request: T9, then the sweep (not pushed). Ledger: F001–F011, all P2/P3. Settled with the owner on 2026-11-20: F008 fixed (`laravel/framework ^13.0`), F004 accepted (E3 refused locally), F009 fixed (a direct call waits out at most 5 s of `Retry-After`); the rest are open. **Next:** `implement-plan` T10 (README, Boost guideline and skill; settles F001–F003, F005–F007, F010, F011).
 
 ---
 

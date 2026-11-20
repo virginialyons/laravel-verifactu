@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Vlec\Verifactu\Tests\TestCase;
 
-uses(TestCase::class)->in(__DIR__);
+pest()->extend(TestCase::class)->in(__DIR__);
 
 /**
  * An invoice as the service answers with it.

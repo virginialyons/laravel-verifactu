@@ -39,7 +39,7 @@ trait RetriesThroughTheQueue
      */
     protected function releaseOrFail(VerifactuException $exception): void
     {
-        if (! $exception->isRetryable()) {
+        if ($exception->isNotRetryable()) {
             throw $exception;
         }
 

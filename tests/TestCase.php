@@ -7,9 +7,11 @@ namespace Vlec\Verifactu\Tests;
 use Illuminate\Support\Facades\Http;
 use Orchestra\Testbench\Concerns\WithWorkbench;
 use Orchestra\Testbench\TestCase as Orchestra;
-use Vlec\Verifactu\VerifactuServiceProvider;
-use Workbench\App\Providers\WorkbenchServiceProvider;
 
+/**
+ * The package's provider and migrations, and Laravel's own migrations
+ * (workbench.install), come from testbench.yaml through WithWorkbench.
+ */
 abstract class TestCase extends Orchestra
 {
     use WithWorkbench;
@@ -19,20 +21,6 @@ abstract class TestCase extends Orchestra
         parent::setUp();
 
         Http::preventStrayRequests();
-    }
-
-    protected function defineDatabaseMigrations(): void
-    {
-        $this->loadLaravelMigrations();
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-    }
-
-    protected function getPackageProviders($app): array
-    {
-        return [
-            VerifactuServiceProvider::class,
-            WorkbenchServiceProvider::class,
-        ];
     }
 
     protected function defineEnvironment($app): void

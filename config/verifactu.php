@@ -65,7 +65,9 @@ return [
     'retries' => 2,
 
     /*
-     * Seconds to wait for a connection, and for the whole answer.
+     * Seconds to wait for a connection, and for the whole answer. Keep the
+     * two under 60 together: a read of an invoice holds its lock for 60
+     * seconds, and a queue worker stops a job after 60 by default.
      */
     'connect_timeout' => 5,
 

@@ -29,7 +29,7 @@ class InvoiceData implements Arrayable
     /** @var array<int, TaxLine> */
     protected array $lines = [];
 
-    /** @var list<array{number: string, issue_date: string}> */
+    /** @var array<int, array{number: string, issue_date: string}> */
     protected array $references = [];
 
     final public function __construct(protected string $description) {}
@@ -76,7 +76,7 @@ class InvoiceData implements Arrayable
     {
         $data = clone $this;
         $data->type = InvoiceType::ReplacesSimplified;
-        $data->references = array_map($this->reference(...), array_values($simplifiedInvoices));
+        $data->references = Collection::make($simplifiedInvoices)->values()->map($this->reference(...))->all();
 
         return $data;
     }
@@ -133,8 +133,8 @@ class InvoiceData implements Arrayable
      */
     public function toArray(): array
     {
-        if ($this->isSimplified() && $this->recipient !== null) {
-            throw new InvalidArgumentException('A simplified invoice (F2) has no recipient.');
+        if ($this->type->takesNoRecipient() && $this->recipient !== null) {
+            throw new InvalidArgumentException("An {$this->type->value} invoice has no recipient: simplified invoices (F2) and their corrective invoices (R5) never name one.");
         }
 
         $body = ['description' => $this->description];
@@ -147,7 +147,7 @@ class InvoiceData implements Arrayable
             $body['recipient'] = $this->recipient->toArray();
         }
 
-        $body['lines'] = array_map(fn (TaxLine $line): array => $line->toArray(), $this->taxLines());
+        $body['lines'] = Collection::make($this->taxLines())->toArray();
 
         if ($this->type === InvoiceType::ReplacesSimplified) {
             $body['replaced_invoices'] = $this->references;
@@ -155,7 +155,7 @@ class InvoiceData implements Arrayable
 
         $body['total_amount'] = TaxLine::decimal($this->totalCents());
 
-        if ($this->type === InvoiceType::Corrective || $this->type === InvoiceType::CorrectiveOfSimplified) {
+        if ($this->type->isCorrective()) {
             $body['correction'] = ['method' => 'difference', 'corrected_invoices' => $this->references];
         }
 

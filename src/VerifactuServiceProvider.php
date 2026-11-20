@@ -5,11 +5,17 @@ declare(strict_types=1);
 namespace Vlec\Verifactu;
 
 use Illuminate\Foundation\Console\AboutCommand;
+use Illuminate\Queue\QueueRoutes;
+use Illuminate\Support\Collection;
 use Illuminate\Support\ServiceProvider;
 use Vlec\Verifactu\Console\Commands\CorrectCommand;
 use Vlec\Verifactu\Console\Commands\InstallCommand;
 use Vlec\Verifactu\Console\Commands\RefreshPendingCommand;
 use Vlec\Verifactu\Console\Commands\StatusCommand;
+use Vlec\Verifactu\Jobs\ApplyInvoiceBatch;
+use Vlec\Verifactu\Jobs\IssueInvoice;
+use Vlec\Verifactu\Jobs\RefreshInvoice;
+use Vlec\Verifactu\Jobs\SendInvoiceBatch;
 
 class VerifactuServiceProvider extends ServiceProvider
 {
@@ -23,6 +29,19 @@ class VerifactuServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadRoutesFrom(__DIR__.'/../routes/webhook.php');
+
+        // A default route: an app's own Queue::route() for one of these jobs still wins.
+        $this->callAfterResolving('queue.routes', function (QueueRoutes $routes): void {
+            $queue = config('verifactu.queue');
+
+            if (! is_string($queue)) {
+                return;
+            }
+
+            $routes->set(Collection::make([IssueInvoice::class, RefreshInvoice::class, SendInvoiceBatch::class, ApplyInvoiceBatch::class])
+                ->mapWithKeys(fn (string $job): array => [$job => $queue])
+                ->all());
+        });
 
         if (! $this->app->runningInConsole()) {
             return;
@@ -43,11 +62,19 @@ class VerifactuServiceProvider extends ServiceProvider
             CorrectCommand::class,
         ]);
 
-        AboutCommand::add('Verifactu', fn (Client $client): array => [
-            'URL' => config('verifactu.url') ?? 'Not set',
-            'Environment' => $client->environment()->name ?? 'Unknown',
-            'Invoice model' => config('verifactu.model'),
-            'Webhook URL' => url(config()->string('verifactu.webhook_path')),
-        ]);
+        AboutCommand::add('Verifactu', function (Client $client): array {
+            $url = config('verifactu.url');
+
+            if (blank($url)) {
+                $url = 'Not set';
+            }
+
+            return [
+                'URL' => $url,
+                'Environment' => $client->environment()->name ?? 'Unknown',
+                'Invoice model' => config('verifactu.model'),
+                'Webhook URL' => url(config()->string('verifactu.webhook_path')),
+            ];
+        });
     }
 }

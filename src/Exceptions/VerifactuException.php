@@ -41,8 +41,11 @@ class VerifactuException extends RuntimeException
 
         $retryAfter = null;
 
-        if (is_numeric($response->header('Retry-After'))) {
-            $retryAfter = (int) $response->header('Retry-After');
+        $header = $response->header('Retry-After');
+
+        // At least a second, as the service's own examples wait.
+        if (is_numeric($header)) {
+            $retryAfter = max(1, (int) $header);
         }
 
         return new self($message, $response->status(), $code, $errors, $retryAfter);
@@ -67,5 +70,10 @@ class VerifactuException extends RuntimeException
         }
 
         return $this->status === 409 && $this->errorCode === 'idempotency_key_in_progress';
+    }
+
+    public function isNotRetryable(): bool
+    {
+        return ! $this->isRetryable();
     }
 }

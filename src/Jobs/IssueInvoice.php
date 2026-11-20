@@ -8,7 +8,9 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Throwable;
 use Vlec\Verifactu\Client;
@@ -34,6 +36,13 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
     public int $uniqueFor = 90000;
 
     /**
+     * Refusals that can mean the invoice was issued by an attempt whose
+     * answer was lost: the sale's reference is taken, or the invoice changed
+     * since and its key no longer fits. Either way, it is read back.
+     */
+    protected const array IssuedBeforeCodes = ['external_reference_already_used', 'idempotency_key_reused'];
+
+    /**
      * One key per send, kept across this job's retries. A later send gets a
      * new key, so a refusal fixed since is really sent again; the service's
      * unique external_reference still stops a second invoice for the sale.
@@ -43,12 +52,6 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
     public function __construct(public Model&VerifactuInvoice $invoice)
     {
         $this->idempotencyKey = $invoice->verifactuReference().':'.Str::uuid();
-
-        $queue = config('verifactu.queue');
-
-        if (is_string($queue)) {
-            $this->onQueue($queue);
-        }
     }
 
     public function uniqueId(): string
@@ -70,7 +73,21 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
             return;
         }
 
-        $this->invoice->storeVerifactuInvoice($invoice);
+        try {
+            $this->invoice->storeVerifactuInvoice($invoice);
+        } catch (QueryException $exception) {
+            // Saved, then a status listener failed: not the save's failure to retry.
+            if ($this->invoice->isClean()) {
+                throw $exception;
+            }
+
+            // The service issued it: the retry's same key replays the answer, to store it then.
+            report($exception);
+
+            $this->release($this->releaseDelay());
+
+            return;
+        }
 
         InvoiceIssued::dispatch($this->invoice);
     }
@@ -99,15 +116,18 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
         try {
             return $client->createInvoice($this->invoice->toVerifactuRequest(), $this->idempotencyKey);
         } catch (VerifactuException $exception) {
-            if ($exception->errorCode !== 'external_reference_already_used') {
+            if (! in_array($exception->errorCode, self::IssuedBeforeCodes, true)) {
                 throw $exception;
             }
+
+            $found = $client->listInvoices(['filter' => ['external_reference' => $this->invoice->verifactuReference()]]);
+
+            // The service holds no invoice for the sale: the refusal stands.
+            if (blank(Arr::get($found, 'data'))) {
+                throw $exception;
+            }
+
+            return $client->getInvoice(Arr::string($found, 'data.0.uuid'));
         }
-
-        // Issued before, by an attempt whose answer was lost: read it back.
-        /** @var array{data: list<array{uuid: string}>} $found */
-        $found = $client->listInvoices(['filter' => ['external_reference' => $this->invoice->verifactuReference()]]);
-
-        return $client->getInvoice($found['data'][0]['uuid']);
     }
 }

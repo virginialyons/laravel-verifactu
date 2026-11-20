@@ -150,11 +150,32 @@ it('throws the service\'s refusal of a fix or a cancellation and stores nothing'
     'cancellation of a cancelled invoice' => [fn (Invoice $invoice) => $invoice->cancelOnVerifactu(), 'cancellation', 409, 'invoice_cancelled'],
 ]);
 
-it('refuses to fix or cancel an invoice not on Verifactu', function (): void {
+it('refuses to :dataset an invoice not on Verifactu', function (Closure $call): void {
     $invoice = Invoice::factory()->create();
+    Http::fake();
 
-    expect(fn () => $invoice->cancelOnVerifactu())
+    expect(fn () => $call($invoice))
         ->toThrow(LogicException::class, 'The invoice is not on Verifactu yet: send it with sendToVerifactu() first.');
+    Http::assertNothingSent();
+})->with([
+    'fix' => [fn (Invoice $invoice) => $invoice->correctOnVerifactu('New description')],
+    'cancel' => [fn (Invoice $invoice) => $invoice->cancelOnVerifactu()],
+]);
+
+it('sends an invoice again after a refusal, once the sale is fixed', function (): void {
+    config(['queue.default' => 'database']);
+    $invoice = Invoice::factory()->create();
+    Http::fake(['verifactu.test/api/v1/invoices' => Http::sequence()
+        ->push(['message' => 'Unknown customer.', 'code' => 'recipient_not_identified'], 422)
+        ->push(['data' => serviceInvoice()], 201)]);
+
+    $invoice->sendToVerifactu();
+    $this->artisan('queue:work', ['--once' => true]);
+    $invoice->sendToVerifactu();
+    $this->artisan('queue:work', ['--once' => true]);
+
+    expect($invoice->fresh()->verifactu_uuid)->not->toBeNull();
+    Http::assertSentCount(2);
 });
 
 it('refers to the sale by the model\'s key', function (): void {

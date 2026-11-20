@@ -19,6 +19,13 @@ use Vlec\Verifactu\Jobs\SendInvoiceBatch;
 
 class Client
 {
+    /**
+     * The longest Retry-After, in seconds, a call waits out before retrying.
+     * A longer wait is the caller's to make, as with Forge's SDK: the call
+     * throws at once, with the seconds in the exception's retryAfter.
+     */
+    protected const int LongestWait = 5;
+
     protected bool $retries = true;
 
     /**
@@ -55,8 +62,9 @@ class Client
     {
         $url = config('verifactu.url');
 
-        if (! is_string($url) || ! Str::startsWith($url, ['https://', 'http://'])) {
-            throw new InvalidArgumentException('Set VERIFACTU_URL to the Verifactu service\'s host, such as https://verifactu.example.com.');
+        // Over plain HTTP the token would travel in clear.
+        if (! is_string($url) || ! Str::startsWith($url, 'https://')) {
+            throw new InvalidArgumentException('Set VERIFACTU_URL to the Verifactu service\'s HTTPS host, such as https://verifactu.example.com.');
         }
 
         $token = config('verifactu.token');
@@ -70,6 +78,7 @@ class Client
         return Http::baseUrl("{$url}api/v1")
             ->withToken($token)
             ->acceptJson()
+            ->withoutRedirecting()
             ->connectTimeout(config()->integer('verifactu.connect_timeout'))
             ->timeout(config()->integer('verifactu.timeout'))
             ->retry(
@@ -90,7 +99,9 @@ class Client
      */
     public function sendBatch(iterable $invoices): void
     {
+        // The same invoice twice would have the whole batch refused for a repeated reference.
         $invoices = Collection::make($invoices)
+            ->unique(fn (Model&VerifactuInvoice $invoice): string => $invoice->verifactuReference())
             ->reject(fn (Model&VerifactuInvoice $invoice): bool => $invoice->isOnVerifactu())
             ->values();
 
@@ -220,7 +231,8 @@ class Client
             throw VerifactuException::fromConnection($exception);
         }
 
-        if ($response->failed()) {
+        // A redirect, or a 2xx that isn't the API's JSON (a proxy's page), is no answer to trust.
+        if (! $response->successful() || ! is_array($response->json('data'))) {
             throw VerifactuException::fromResponse($response);
         }
 
@@ -247,21 +259,30 @@ class Client
         return config()->integer('verifactu.retries') + 1;
     }
 
-    protected function shouldRetry(Throwable $exception): bool
+    /**
+     * Null for an answer that is neither a success nor an error, such as a redirect: never retried.
+     */
+    protected function shouldRetry(?Throwable $exception): bool
     {
         if ($exception instanceof ConnectionException) {
             return true;
         }
 
         if ($exception instanceof RequestException) {
-            return VerifactuException::fromResponse($exception->response)->isRetryable();
+            $answer = VerifactuException::fromResponse($exception->response);
+
+            if ($answer->isNotRetryable()) {
+                return false;
+            }
+
+            return $answer->retryAfter === null || $answer->retryAfter <= self::LongestWait;
         }
 
         return false;
     }
 
     /**
-     * Waits the Retry-After seconds the service asks for, or one second.
+     * Waits the Retry-After seconds the service asks for, at most LongestWait, or one second.
      */
     protected function retryDelay(int $attempt, mixed $exception): int
     {

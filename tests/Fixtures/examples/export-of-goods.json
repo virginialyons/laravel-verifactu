@@ -1,0 +1,29 @@
+{
+    "slug": "export-of-goods",
+    "title": "Export of goods outside the EU",
+    "description": "Goods shipped outside the EU, exempt under article 21 (exportación de bienes), exemption E2.",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura extracomunitaria - Exportación de bienes",
+            "recipient": {
+                "name": "Nombre destinatario",
+                "country_code": "US",
+                "id_type": "03",
+                "id": "M76543210"
+            },
+            "lines": [
+                {
+                    "tax_base": "200",
+                    "regime_key": "02",
+                    "exemption_reason": "E2"
+                }
+            ],
+            "total_amount": "200"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

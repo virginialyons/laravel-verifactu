@@ -16,6 +16,7 @@ use Vlec\Verifactu\Client;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\Events\InvoiceNotIssued;
 use Vlec\Verifactu\Exceptions\VerifactuException;
+use Vlec\Verifactu\InvoiceBatchStatus;
 use Vlec\Verifactu\Jobs\Concerns\RetriesThroughTheQueue;
 use Vlec\Verifactu\Models\InvoiceBatch;
 
@@ -41,17 +42,11 @@ class SendInvoiceBatch implements ShouldQueue, ShouldQueueAfterCommit
     public function __construct(public Collection $invoices)
     {
         $this->idempotencyKey = 'batch:'.Str::uuid();
-
-        $queue = config('verifactu.queue');
-
-        if (is_string($queue)) {
-            $this->onQueue($queue);
-        }
     }
 
     public function handle(Client $client): void
     {
-        $batch = ['invoices' => $this->invoices->map(fn (Model&VerifactuInvoice $invoice): array => $invoice->toVerifactuRequest())->all()];
+        $batch = ['invoices' => $this->invoices->map(fn (Model&VerifactuInvoice $invoice): array => $invoice->toVerifactuRequest())->values()->all()];
 
         try {
             $answer = $client->withoutRetries()->createInvoiceBatch($batch, $this->idempotencyKey);
@@ -62,7 +57,8 @@ class SendInvoiceBatch implements ShouldQueue, ShouldQueueAfterCommit
         }
 
         try {
-            InvoiceBatch::firstOrCreate(['uuid' => $answer['uuid']], ['status' => $answer['status']]);
+            // Queued until applied, whatever the service first answered: applying it sets the final status.
+            InvoiceBatch::firstOrCreate(['uuid' => $answer['uuid']], ['status' => InvoiceBatchStatus::Queued]);
         } catch (QueryException $exception) {
             // The service took the batch: the retry's same key replays its answer, to store it then.
             report($exception);
@@ -73,7 +69,8 @@ class SendInvoiceBatch implements ShouldQueue, ShouldQueueAfterCommit
 
     /**
      * The service refused the batch, or never answered within the retries:
-     * none of its invoices was issued.
+     * none of its invoices was issued by it. One issued on its own since is
+     * not reported.
      */
     public function failed(?Throwable $exception): void
     {
@@ -84,6 +81,10 @@ class SendInvoiceBatch implements ShouldQueue, ShouldQueueAfterCommit
         }
 
         foreach ($this->invoices as $invoice) {
+            if ($invoice->isOnVerifactu()) {
+                continue;
+            }
+
             InvoiceNotIssued::dispatch($invoice, $errorCode, $exception?->getMessage() ?? 'The job failed.');
         }
     }

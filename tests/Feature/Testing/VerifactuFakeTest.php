@@ -3,8 +3,14 @@
 declare(strict_types=1);
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Http\Client\StrayRequestException;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\ExpectationFailedException;
 use Vlec\Verifactu\Events\InvoiceAccepted;
 use Vlec\Verifactu\Events\InvoiceBatchCompleted;
@@ -91,7 +97,7 @@ it('completes a batch at once and applies it', function (): void {
 
     Verifactu::assertBatchSent();
     $invoices->each(fn (Invoice $invoice) => Verifactu::assertIssued($invoice));
-    expect($invoices->map(fn (Invoice $invoice): ?string => $invoice->fresh()->number)->all())->toBe(['FACT1', 'FACT2', 'FACT3'])
+    expect($invoices->fresh()->pluck('number')->all())->toBe(['FACT1', 'FACT2', 'FACT3'])
         ->and(InvoiceBatch::sole()->status)->toBe(InvoiceBatchStatus::Completed);
     Event::assertDispatchedTimes(InvoiceIssued::class, 3);
     Event::assertDispatched(InvoiceBatchCompleted::class, fn (InvoiceBatchCompleted $event): bool => $event->succeeded === 3);
@@ -190,7 +196,7 @@ it('completes a batch when the test fakes every event', function (): void {
 
     Verifactu::sendBatch($invoices);
 
-    expect($invoices->map(fn (Invoice $invoice): ?string => $invoice->fresh()->number)->all())->toBe(['FACT1', 'FACT2']);
+    expect($invoices->fresh()->pluck('number')->all())->toBe(['FACT1', 'FACT2']);
     Event::assertDispatchedTimes(InvoiceIssued::class, 2);
 });
 
@@ -201,6 +207,7 @@ it('reads a batch of more than one page of items', function (): void {
     Verifactu::sendBatch($invoices);
 
     expect($invoices->last()->fresh()->number)->toBe('FACT101');
+    Http::assertSent(fn (Request $request): bool => Str::endsWith($request->url(), '/items?page=2'));
 });
 
 it('stores an invoice of a batch that was issued before on its own', function (): void {
@@ -216,17 +223,17 @@ it('stores an invoice of a batch that was issued before on its own', function ()
         ->and($new->fresh()->number)->toBe('FACT2');
 });
 
-it('refuses a batch that repeats an invoice, as the service does', function (): void {
-    Event::fake([InvoiceNotIssued::class]);
+it('refuses a batch that repeats a reference, naming the items, as the service does', function (): void {
     Verifactu::fake();
-    $invoice = Invoice::factory()->create();
+    $message = 'Items that have an external_reference need distinct ones.';
 
-    // On the sync queue, the job's failure reaches the caller once failed() has run.
-    expect(fn () => Verifactu::sendBatch([$invoice, $invoice]))
-        ->toThrow(VerifactuException::class, 'Items that have an external_reference need distinct ones.');
+    expect(fn () => Verifactu::createInvoiceBatch(['invoices' => [sale(), sale(['external_reference' => 'order-2']), sale()]]))
+        ->toThrow(fn (VerifactuException $exception) => expect($exception)
+            ->errorCode->toBe('validation_failed')
+            ->getMessage()->toBe($message)
+            ->errors->toBe(['invoices.0.external_reference' => [$message], 'invoices.2.external_reference' => [$message]]));
 
     Verifactu::assertNothingIssued();
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->errorCode === 'validation_failed');
 });
 
 it('refuses to fix a cancelled invoice, as the service does', function (): void {
@@ -364,3 +371,429 @@ it('issues to a customer AEAT does not know when the check is skipped: :dataset'
     'validate_recipient false' => [['recipient' => ['tax_id' => 'A15022510', 'name' => 'Acme S.L.'], 'validate_recipient' => false]],
     'no Spanish tax ID' => [['recipient' => ['name' => 'Acme GmbH', 'country_code' => 'DE', 'id_type' => '02', 'id' => 'DE123456789']]],
 ]);
+
+/**
+ * A POST /invoices body to a Spanish customer.
+ */
+function sale(array $attributes = []): array
+{
+    return [
+        'description' => 'Web design',
+        'total_amount' => '121.00',
+        'external_reference' => 'order-1',
+        'recipient' => ['tax_id' => 'A15022510', 'name' => 'Acme S.L.'],
+        'lines' => [['tax_base' => '100.00', 'operation_qualification' => 'S1', 'tax_rate' => '21', 'tax_amount' => '21.00']],
+        ...$attributes,
+    ];
+}
+
+/**
+ * The service's refusal of a request the client sent, as an exception.
+ */
+function refusalOf(Closure $request): VerifactuException
+{
+    try {
+        $request();
+    } catch (VerifactuException $exception) {
+        return $exception;
+    }
+
+    throw new LogicException('The fake Verifactu did not refuse the request.');
+}
+
+/**
+ * An invoice issued on the fake Verifactu that AEAT has answered for.
+ */
+function answeredInvoice(InvoiceStatus $status = InvoiceStatus::Accepted): Invoice
+{
+    $invoice = Invoice::factory()->create();
+    $invoice->sendToVerifactu();
+    Verifactu::decide($invoice, $status);
+
+    return $invoice->fresh();
+}
+
+it('lets a correction change the description and each line\'s codes not printed', function (): void {
+    Verifactu::fake();
+    $invoice = answeredInvoice(InvoiceStatus::Rejected);
+    $body = $invoice->toVerifactuRequest();
+    $body['description'] = 'Spanish course, B2';
+    $body['lines'][0] = [...$body['lines'][0], 'regime_key' => '01', 'exemption_reason' => 'E6'];
+
+    expect(Verifactu::correctInvoice($invoice->verifactu_uuid, $body))->status->toBe('pending');
+    Verifactu::assertCorrected($invoice);
+});
+
+it('refuses a correction that changes :dataset, as the service does', function (Closure $change, string $field): void {
+    Verifactu::fake();
+    $invoice = answeredInvoice(InvoiceStatus::Rejected);
+
+    $refusal = refusalOf(fn () => Verifactu::correctInvoice($invoice->verifactu_uuid, $change($invoice->toVerifactuRequest())));
+
+    expect($refusal)
+        ->status->toBe(422)
+        ->errorCode->toBe('correction_changes_fiscal_data')
+        ->errors->toHaveKey($field);
+})->with([
+    'the total' => [fn (array $body): array => [...$body, 'total_amount' => '999.00'], 'total_amount'],
+    'the customer' => [fn (array $body): array => [...$body, 'recipient' => ['tax_id' => 'B12345674', 'name' => 'Other S.L.']], 'recipient'],
+    'a line\'s base' => [fn (array $body): array => [...$body, 'lines' => [[...$body['lines'][0], 'tax_base' => '1.00'], ...Arr::except($body['lines'], 0)]], 'lines'],
+    'the order of its lines' => [fn (array $body): array => [...$body, 'lines' => Collection::make($body['lines'])->reverse()->values()->all()], 'lines'],
+]);
+
+it('gives the verification code and registration time only when AEAT registers the record: :dataset', function (InvoiceStatus $status, bool $registered): void {
+    Verifactu::fake();
+    $invoice = answeredInvoice($status);
+
+    $aeat = Verifactu::getInvoice($invoice->verifactu_uuid)['aeat'];
+
+    expect(filled($aeat['verification_code']))->toBe($registered)
+        ->and(filled($aeat['registered_at']))->toBe($registered);
+})->with([
+    'accepted' => [InvoiceStatus::Accepted, true],
+    'accepted with errors' => [InvoiceStatus::AcceptedWithErrors, true],
+    'rejected' => [InvoiceStatus::Rejected, false],
+]);
+
+it('starts a new record when an invoice is :dataset: no answer yet and a new hash', function (Closure $change): void {
+    Verifactu::fake();
+    $invoice = answeredInvoice();
+    $before = Verifactu::getInvoice($invoice->verifactu_uuid);
+
+    $change($invoice);
+
+    expect(Verifactu::getInvoice($invoice->verifactu_uuid))
+        ->status->toBe('pending')
+        ->hash->not->toBe($before['hash'])
+        ->aeat->toBe(['verification_code' => null, 'error_code' => null, 'error_message' => null, 'registered_at' => null]);
+})->with([
+    'corrected' => [fn (Invoice $invoice) => $invoice->correctOnVerifactu()],
+    'cancelled' => [fn (Invoice $invoice) => $invoice->cancelOnVerifactu()],
+]);
+
+it('ends a cancellation AEAT accepts cancelled', function (): void {
+    Event::fake([InvoiceCancelled::class]);
+    Verifactu::fake();
+    $invoice = answeredInvoice();
+    $invoice->cancelOnVerifactu();
+
+    Verifactu::decide($invoice, InvoiceStatus::Accepted);
+
+    Event::assertDispatched(InvoiceCancelled::class);
+    expect($invoice->fresh()->aeat_status)->toBe(InvoiceStatus::Cancelled)
+        ->and(Verifactu::getInvoice($invoice->verifactu_uuid)['aeat']['registered_at'])->not->toBeNull();
+});
+
+it('refuses to decide :dataset', function (Closure $setUp, InvoiceStatus $status, ?string $errorCode, string $message): void {
+    Verifactu::fake();
+    $invoice = answeredInvoice();
+    $setUp($invoice);
+
+    expect(fn () => Verifactu::decide($invoice, $status, $errorCode))->toThrow(LogicException::class, $message);
+})->with([
+    'pending' => [fn (Invoice $invoice) => $invoice->correctOnVerifactu(), InvoiceStatus::Pending, null, 'AEAT answers accepted, accepted with errors or rejected, or registers a cancellation: pending is no answer.'],
+    'cancelled when no cancellation awaits' => [fn (Invoice $invoice) => $invoice->correctOnVerifactu(), InvoiceStatus::Cancelled, null, "No cancellation of the invoice [invoice:1] awaits AEAT's answer: cancel it first."],
+    'a rejection of a cancellation' => [fn (Invoice $invoice) => $invoice->cancelOnVerifactu(), InvoiceStatus::Rejected, null, "The cancellation of the invoice [invoice:1] awaits AEAT's answer: decide Cancelled."],
+    'an error code with an acceptance' => [fn (Invoice $invoice) => $invoice->correctOnVerifactu(), InvoiceStatus::Accepted, '1100', 'only when it accepts a record with errors or rejects it'],
+]);
+
+it('lists 25 invoices a page, with the links and meta the service gives', function (): void {
+    Verifactu::fake();
+    Collection::range(1, 30)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-{$order}"])));
+    $url = 'https://verifactu.test/api/v1/invoices';
+
+    $page = Verifactu::listInvoices(['page' => ['number' => 2]]);
+
+    expect($page['data'])->toHaveCount(5)
+        ->and($page['data'][0])->external_reference->toBe('order-26')->not->toHaveKey('qr_code')
+        ->and($page['links'])->toBe([
+            'first' => "{$url}?page%5Bnumber%5D=1",
+            'last' => "{$url}?page%5Bnumber%5D=2",
+            'prev' => "{$url}?page%5Bnumber%5D=1",
+            'next' => null,
+        ])
+        ->and($page['meta'])->toBe([
+            'current_page' => 2,
+            'from' => 26,
+            'last_page' => 2,
+            'links' => [
+                ['url' => "{$url}?page%5Bnumber%5D=1", 'label' => '&laquo; Previous', 'page' => 1, 'active' => false],
+                ['url' => "{$url}?page%5Bnumber%5D=1", 'label' => '1', 'page' => 1, 'active' => false],
+                ['url' => "{$url}?page%5Bnumber%5D=2", 'label' => '2', 'page' => 2, 'active' => true],
+                ['url' => null, 'label' => 'Next &raquo;', 'page' => null, 'active' => false],
+            ],
+            'path' => $url,
+            'per_page' => 25,
+            'to' => 30,
+            'total' => 30,
+        ]);
+});
+
+it('keeps the query in the page links and lists at most 100 a page', function (): void {
+    Verifactu::fake();
+    Collection::range(1, 101)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-{$order}"])));
+
+    $page = Verifactu::listInvoices(['filter' => ['status' => 'pending'], 'page' => ['size' => 500]]);
+
+    expect($page['data'])->toHaveCount(100)
+        ->and($page['meta'])->per_page->toBe(100)->last_page->toBe(2)
+        ->and($page['links']['next'])->toBe('https://verifactu.test/api/v1/invoices?filter%5Bstatus%5D=pending&page%5Bsize%5D=500&page%5Bnumber%5D=2');
+});
+
+it('filters the list of invoices by :dataset', function (array $filter, array $references): void {
+    Verifactu::fake();
+    Verifactu::createInvoice(sale(['external_reference' => 'order-1']));
+    $this->travelTo('2026-11-20 10:00:00');
+    Verifactu::createInvoice(sale(['external_reference' => 'order-2', 'invoice_type' => 'F2', 'recipient' => null]));
+    $this->travelTo('2026-11-21 10:00:00');
+    Verifactu::createInvoice(sale(['external_reference' => 'ORDER-3', 'recipient' => ['tax_id' => '12345678Z', 'name' => 'Ana Pérez']]));
+
+    $list = Verifactu::listInvoices(['filter' => $filter, 'sort' => 'created_at']);
+
+    expect(Collection::make($list['data'])->pluck('external_reference')->all())->toBe($references);
+})->with([
+    'number' => [['number' => '2'], ['order-2']],
+    'invoice number' => [['invoice_number' => 'FACT3'], ['ORDER-3']],
+    'external reference' => [['external_reference' => 'order-1'], ['order-1']],
+    // Read as one status, "rejected,pending" would match none.
+    'several statuses' => [['status' => 'rejected,pending'], ['order-1', 'order-2', 'ORDER-3']],
+    'a status none has' => [['status' => 'rejected'], []],
+    'several types' => [['invoice_type' => 'F2,R1'], ['order-2']],
+    'the customer\'s tax ID' => [['recipient_tax_id' => '12345678Z'], ['ORDER-3']],
+    'issue dates' => [['issue_date_from' => '2026-11-20', 'issue_date_to' => '2026-11-20'], ['order-2']],
+    'a search in the reference, whatever its case' => [['search' => 'der-3'], ['ORDER-3']],
+    'a search in the customer\'s name' => [['search' => 'pérez'], ['ORDER-3']],
+]);
+
+it('sorts the list of invoices by :dataset', function (?string $sort, array $references): void {
+    Verifactu::fake();
+    // Numbered FACT1 to FACT3 in this order, on dates that are not.
+    $this->travelTo('2026-11-21 10:00:00');
+    Verifactu::createInvoice(sale(['external_reference' => 'order-1', 'total_amount' => '50.00']));
+    $this->travelTo('2026-11-19 10:00:00');
+    Verifactu::createInvoice(sale(['external_reference' => 'order-2', 'total_amount' => '9.00']));
+    $this->travelTo('2026-11-20 10:00:00');
+    Verifactu::createInvoice(sale(['external_reference' => 'order-3', 'total_amount' => '100.00']));
+
+    $list = Verifactu::listInvoices(Arr::whereNotNull(['sort' => $sort]));
+
+    expect(Collection::make($list['data'])->pluck('external_reference')->all())->toBe($references);
+})->with([
+    'the newest issue date first, the default' => [null, ['order-1', 'order-3', 'order-2']],
+    'issue date' => ['issue_date', ['order-2', 'order-3', 'order-1']],
+    'invoice number, descending' => ['-invoice_number', ['order-3', 'order-2', 'order-1']],
+    'total amount' => ['total_amount', ['order-2', 'order-1', 'order-3']],
+    'creation, newest first' => ['-created_at', ['order-3', 'order-2', 'order-1']],
+]);
+
+it('refuses a list query the service does not allow: :dataset', function (array $query, string $code): void {
+    Verifactu::fake();
+
+    expect(refusalOf(fn () => Verifactu::listInvoices($query)))
+        ->status->toBe(400)
+        ->errorCode->toBe($code);
+})->with([
+    'a filter' => [['filter' => ['customer' => 'Acme']], 'invalid_filter'],
+    'a sort' => [['sort' => '-number'], 'invalid_sort'],
+    'an include' => [['include' => 'tax_lines,recipient'], 'invalid_include'],
+]);
+
+it('includes the tax lines, references and AEAT records of each invoice in the list', function (): void {
+    Verifactu::fake();
+    $invoice = answeredInvoice();
+    $invoice->cancelOnVerifactu();
+    Verifactu::createInvoice(sale([
+        'external_reference' => 'refund-1',
+        'invoice_type' => 'R1',
+        'total_amount' => '-24.20',
+        'lines' => [['tax_base' => '-20.00', 'operation_qualification' => 'S1', 'tax_rate' => '21', 'tax_amount' => '-4.20']],
+        'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '1', 'issue_date' => '2026-11-19']]],
+    ]));
+
+    [$cancelled, $refund] = Verifactu::listInvoices(['include' => 'tax_lines,references,billing_records', 'sort' => 'created_at'])['data'];
+
+    expect($cancelled['tax_lines'])->toBe([[
+        'tax_type' => '01',
+        'regime_key' => '01',
+        'operation_qualification' => null,
+        'exemption_reason' => 'E1',
+        'tax_base' => '300.00',
+        'tax_rate' => null,
+        'tax_amount' => null,
+        'equivalence_surcharge_rate' => null,
+        'equivalence_surcharge_amount' => null,
+    ], [
+        'tax_type' => '01',
+        'regime_key' => '01',
+        'operation_qualification' => 'S1',
+        'exemption_reason' => null,
+        'tax_base' => '20.00',
+        'tax_rate' => '21',
+        'tax_amount' => '4.20',
+        'equivalence_surcharge_rate' => null,
+        'equivalence_surcharge_amount' => null,
+    ]])
+        ->and(Collection::make($cancelled['billing_records'])->map(fn (array $record): array => [$record['type'], $record['status']])->all())
+        ->toBe([['registration', 'accepted'], ['cancellation', 'pending']])
+        ->and(Arr::last($cancelled['billing_records'])['hash'])->toBe($cancelled['hash'])
+        ->and($refund['references'])->toBe([['kind' => 'corrected', 'invoice_number' => 'FACT1', 'issue_date' => '2026-11-19']]);
+});
+
+it('replays the first answer to a repeated Idempotency-Key, refusals included', function (): void {
+    Verifactu::fake();
+    $send = fn (array $body) => Verifactu::http()->withHeaders(['Idempotency-Key' => 'order-1'])->post('invoices', $body);
+
+    $first = $send(sale());
+    $replay = $send(sale());
+
+    expect($first)->status()->toBe(201)->header('Idempotent-Replayed')->toBe('')
+        ->and($replay)->status()->toBe(201)->header('Idempotent-Replayed')->toBe('true')
+        ->and($replay->json('data.uuid'))->toBe($first->json('data.uuid'))
+        ->and(Verifactu::listInvoices()['meta']['total'])->toBe(1);
+
+    $refusal = fn () => Verifactu::http()->withHeaders(['Idempotency-Key' => 'order-2'])->post('invoices', sale(['external_reference' => 'order-2', 'recipient' => null]));
+
+    expect($refusal())->status()->toBe(422)
+        ->and($refusal())->status()->toBe(422)->header('Idempotent-Replayed')->toBe('true');
+});
+
+it('refuses an Idempotency-Key used with another request', function (): void {
+    Verifactu::fake();
+    Verifactu::createInvoice(sale(), 'key-1');
+
+    expect(refusalOf(fn () => Verifactu::createInvoice(sale(['external_reference' => 'order-2']), 'key-1')))
+        ->status->toBe(422)->errorCode->toBe('idempotency_key_reused')
+        ->and(refusalOf(fn () => Verifactu::cancelInvoice(Verifactu::listInvoices()['data'][0]['uuid'], 'key-1')))
+        ->errorCode->toBe('idempotency_key_reused');
+});
+
+it('refuses a batch without an Idempotency-Key', function (): void {
+    Verifactu::fake();
+
+    $response = Verifactu::http()->post('invoice-batches', ['invoices' => [sale()]]);
+
+    expect($response->status())->toBe(422)
+        ->and($response->json('code'))->toBe('idempotency_key_required');
+});
+
+it('leaves the requests it does not play to the app\'s own fake', function (): void {
+    Verifactu::fake();
+    Http::fake(['verifactu.test/api/v1/invoices/*/xml' => Http::response(['data' => ['records' => []]])]);
+    $uuid = Verifactu::createInvoice(sale())['uuid'];
+
+    expect(Verifactu::http()->get("invoices/{$uuid}/xml")->json())->toBe(['data' => ['records' => []]])
+        ->and(fn () => Verifactu::http()->get("invoices/{$uuid}/aeat-status"))
+        ->toThrow(StrayRequestException::class, "invoices/{$uuid}/aeat-status");
+});
+
+it('answers 404 for an invoice or batch it does not hold', function (Closure $request): void {
+    Verifactu::fake();
+
+    expect(refusalOf($request))->status->toBe(404);
+})->with([
+    'read' => [fn () => Verifactu::getInvoice('unknown')],
+    'correct' => [fn () => Verifactu::correctInvoice('unknown', sale())],
+    'cancel' => [fn () => Verifactu::cancelInvoice('unknown')],
+    'read a batch' => [fn () => Verifactu::getInvoiceBatch('unknown')],
+    'read a batch\'s items' => [fn () => Verifactu::listInvoiceBatchItems('unknown')],
+]);
+
+it('refuses an invoice body as the service does: :dataset', function (array $body, string $code, string $field): void {
+    Verifactu::fake();
+
+    expect(refusalOf(fn () => Verifactu::createInvoice($body)))
+        ->status->toBe(422)
+        ->errorCode->toBe($code)
+        ->errors->toHaveKey($field);
+
+    Verifactu::assertNothingIssued();
+})->with([
+    'an issue date' => [sale(['issue_date' => '2026-11-19']), 'issue_date_is_assigned_by_service', 'issue_date'],
+    'a series' => [sale(['series' => 'A']), 'series_is_assigned_by_service', 'series'],
+    'a number' => [sale(['number' => '7']), 'number_is_assigned_by_service', 'number'],
+    'no description' => [Arr::except(sale(), 'description'), 'invalid_description', 'description'],
+    'a blank description' => [sale(['description' => ' ']), 'invalid_description', 'description'],
+    'a new line in the description' => [sale(['description' => "Web design\nNovember"]), 'control_character_not_allowed', 'description'],
+    'a tab in the customer\'s name' => [sale(['recipient' => ['tax_id' => 'A15022510', 'name' => "Acme\tS.L."]]), 'control_character_not_allowed', 'recipient.name'],
+    'a customer without a name' => [sale(['recipient' => ['tax_id' => 'A15022510']]), 'invalid_recipient_name', 'recipient.name'],
+    'a customer\'s name over 120 characters' => [sale(['recipient' => ['tax_id' => 'A15022510', 'name' => Str::repeat('a', 121)]]), 'invalid_recipient_name', 'recipient.name'],
+    'a simplified invoice over 3,000.00' => [sale(['invoice_type' => 'F2', 'recipient' => null, 'total_amount' => '3000.01', 'lines' => [['tax_base' => '3000.01', 'exemption_reason' => 'E1']]]), 'simplified_invoice_over_limit', 'total_amount'],
+    'no total' => [Arr::except(sale(), 'total_amount'), 'field_required', 'total_amount'],
+    'a total as a number' => [sale(['total_amount' => 121]), 'invalid_amount', 'total_amount'],
+    'a line amount with a comma' => [sale(['lines' => [['tax_base' => '100,00', 'exemption_reason' => 'E1']]]), 'invalid_amount', 'lines.0.tax_base'],
+    'a reference over 100 characters' => [sale(['external_reference' => Str::repeat('a', 101)]), 'invalid_external_reference', 'external_reference'],
+    'a line without a base' => [sale(['lines' => [['exemption_reason' => 'E1']]]), 'field_required', 'lines.0.tax_base'],
+    'an unknown type' => [sale(['invoice_type' => 'F9']), 'invalid_invoice_type', 'invoice_type'],
+    'a full invoice without a recipient' => [Arr::except(sale(), 'recipient'), 'recipient_required', 'recipient'],
+    'a simplified invoice with a recipient' => [sale(['invoice_type' => 'F2']), 'recipient_not_allowed', 'recipient'],
+    'a wrong check letter' => [sale(['recipient' => ['tax_id' => '12345678A', 'name' => 'Ana Pérez']]), 'invalid_tax_id', 'recipient.tax_id'],
+]);
+
+it('fails the batch item the service refuses, with the fields', function (): void {
+    Verifactu::fake();
+
+    $batch = Verifactu::createInvoiceBatch(['invoices' => [
+        sale(),
+        sale(['external_reference' => 'order-2', 'recipient' => ['tax_id' => 'A15022511', 'name' => 'Acme S.L.']]),
+    ]], 'batch-1');
+
+    expect(Verifactu::listInvoiceBatchItems($batch['uuid'])['data'][1])
+        ->result->toBe('failed')
+        ->error->code->toBe('invalid_tax_id')
+        ->error->errors->toHaveKey('recipient.tax_id');
+});
+
+it('accepts a valid Spanish tax ID: :dataset', function (string $taxId): void {
+    Verifactu::fake();
+
+    expect(Verifactu::checkTaxId($taxId, 'Acme S.L.')->result)->toBe(TaxIdCheckResult::Identified);
+})->with([
+    'a company, digit control' => ['A15022510'],
+    'a company, lower case' => ['a15022510'],
+    'an entity of either control, digit' => ['G12345674'],
+    'an entity of either control, letter' => ['G1234567D'],
+    'a public body, letter control' => ['Q2826000H'],
+    'a DNI' => ['12345678Z'],
+    'an NIE starting X' => ['X1234567L'],
+    'an NIE starting Y' => ['Y1234567X'],
+    'an NIE starting Z' => ['Z1234567R'],
+    'a K NIF' => ['K1234567L'],
+]);
+
+it('refuses a tax-ID check as the service does: :dataset', function (array $body, string $code, string $field): void {
+    Verifactu::fake();
+
+    $response = Verifactu::http()->post('tax-id-checks', $body);
+
+    expect($response->status())->toBe(422)
+        ->and($response->json('code'))->toBe($code)
+        ->and($response->json('errors'))->toHaveKey($field);
+})->with([
+    'no tax ID' => [['name' => 'Acme S.L.'], 'field_required', 'tax_id'],
+    'no name' => [['tax_id' => 'A15022510'], 'field_required', 'name'],
+    'a name over 120 characters' => [['tax_id' => 'A15022510', 'name' => Str::repeat('a', 121)], 'invalid_recipient_name', 'name'],
+    'a wrong DNI letter' => [['tax_id' => '12345678A', 'name' => 'Ana Pérez'], 'invalid_tax_id', 'tax_id'],
+    'a wrong NIE letter' => [['tax_id' => 'X1234567A', 'name' => 'Ana Pérez'], 'invalid_tax_id', 'tax_id'],
+    'a wrong company digit' => [['tax_id' => 'A15022511', 'name' => 'Acme S.L.'], 'invalid_tax_id', 'tax_id'],
+    'a letter where a company has a digit' => [['tax_id' => 'B1234567D', 'name' => 'Acme S.L.'], 'invalid_tax_id', 'tax_id'],
+    'a digit where a public body has a letter' => [['tax_id' => 'Q28260008', 'name' => 'Ayuntamiento'], 'invalid_tax_id', 'tax_id'],
+    'a wrong format' => [['tax_id' => '1234', 'name' => 'Acme S.L.'], 'invalid_tax_id', 'tax_id'],
+]);
+
+it('answers in the token\'s environment: :dataset', function (string $token, string $environment): void {
+    config(['verifactu.token' => $token]);
+    Verifactu::fake();
+
+    expect(Verifactu::createInvoice(sale())['environment'])->toBe($environment)
+        ->and(Verifactu::createInvoiceBatch(['invoices' => [sale(['external_reference' => 'order-2'])]], 'batch-1')['environment'])->toBe($environment);
+})->with([
+    'test' => ['vf_test_token-for-tests', 'test'],
+    'live' => ['vf_prod_token-for-tests', 'production'],
+]);
+
+it('refuses a token that is not the service\'s', function (): void {
+    config(['verifactu.token' => 'not-a-verifactu-token']);
+    Verifactu::fake();
+
+    expect(refusalOf(fn () => Verifactu::createInvoice(sale())))->status->toBe(401);
+});

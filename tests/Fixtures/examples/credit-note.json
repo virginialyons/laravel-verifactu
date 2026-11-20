@@ -1,0 +1,28 @@
+{
+    "slug": "credit-note",
+    "title": "Credit note",
+    "description": "A refund to the customer as a full invoice with negative amounts (factura de abono).",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura de abono",
+            "recipient": {
+                "tax_id": "A15022510",
+                "name": "Nombre destinatario"
+            },
+            "lines": [
+                {
+                    "tax_base": "-200",
+                    "operation_qualification": "S1",
+                    "tax_rate": "21",
+                    "tax_amount": "-42"
+                }
+            ],
+            "total_amount": "-242"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

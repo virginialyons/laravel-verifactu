@@ -42,7 +42,7 @@ class Verifactu extends Facade
 {
     /**
      * Replaces the Verifactu service with an in-memory one for the app's
-     * tests; the package's jobs, trait and events still run.
+     * tests; the package's jobs, model methods and events still run.
      */
     public static function fake(): VerifactuFake
     {

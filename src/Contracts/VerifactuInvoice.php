@@ -8,7 +8,7 @@ use Vlec\Verifactu\InvoiceData;
 
 /**
  * An app's invoice model. The app writes toVerifactu(); the
- * IssuesVerifactuInvoices trait provides the rest.
+ * IssuesVerifactuInvoices concern provides the rest.
  */
 interface VerifactuInvoice
 {

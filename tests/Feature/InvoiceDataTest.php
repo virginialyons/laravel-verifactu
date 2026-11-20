@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use BcMath\Number;
+use Illuminate\Support\Facades\File;
 use Vlec\Verifactu\ExemptionReason;
 use Vlec\Verifactu\ForeignIdType;
 use Vlec\Verifactu\InvoiceData;
@@ -18,7 +19,7 @@ use Workbench\App\Models\Invoice;
  */
 function serviceExample(string $slug): array
 {
-    $example = json_decode((string) file_get_contents(__DIR__."/../Fixtures/examples/{$slug}.json"), true);
+    $example = File::json(__DIR__."/../Fixtures/examples/{$slug}.json");
 
     return withTwoDecimals($example['request']['body']);
 }
@@ -63,6 +64,9 @@ it('builds the body of the service example :dataset', function (Closure $build, 
     'simplified' => [fn () => InvoiceData::make('Factura simplificada')->simplified()->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'simplified'],
     'simplified-credit-note' => [fn () => InvoiceData::make('Factura de canje, opción 1: abono de la simplificada')->simplified()->lines([TaxLine::vat(-20000, rate: 21)]), 'simplified-credit-note'],
     'replaces-simplified' => [fn () => InvoiceData::make('Factura de canje, opción 2: sustitutiva (F3)')->to($business)->lines([TaxLine::vat(20000, rate: 21)])->replacing(issuedInvoice('S-1', '2026-10-02', simplified: true)), 'replaces-simplified'],
+    'credit-note' => [fn () => InvoiceData::make('Factura de abono')->to($business)->lines([TaxLine::vat(-20000, rate: 21)]), 'credit-note'],
+    'export-of-goods' => [fn () => InvoiceData::make('Factura extracomunitaria - Exportación de bienes')->to(Recipient::foreign('Nombre destinatario', 'US', ForeignIdType::Passport, 'M76543210'))->lines([TaxLine::exempt(20000, ExemptionReason::Exports)]), 'export-of-goods'],
+    'intra-eu-goods' => [fn () => InvoiceData::make('Factura B2B intracomunitaria - Venta de bienes')->to(Recipient::foreign('Nombre destinatario', 'BE', ForeignIdType::EuVatNumber, 'BE0404621642'))->lines([TaxLine::exempt(20000, ExemptionReason::IntraEuSupplies)]), 'intra-eu-goods'],
 ]);
 
 it('builds the service example of a corrective invoice for the difference, as an R1', function (): void {
@@ -159,6 +163,12 @@ it('refuses an invoice without lines', function (): void {
         ->toThrow(InvalidArgumentException::class, 'An invoice has between 1 and 12 tax lines; this one has 0.');
 });
 
+it('takes 12 tax lines', function (): void {
+    $lines = collect(range(1, 12))->map(fn (int $rate): TaxLine => TaxLine::vat(100, rate: $rate));
+
+    expect(InvoiceData::make('Twelve rates')->to(Recipient::spanish('A15022510', 'Acme'))->lines($lines)->toArray()['lines'])->toHaveCount(12);
+});
+
 it('refuses more than 12 tax lines', function (): void {
     $lines = collect(range(1, 13))->map(fn (int $rate): TaxLine => TaxLine::vat(100, rate: $rate));
 
@@ -169,8 +179,32 @@ it('refuses more than 12 tax lines', function (): void {
 it('refuses a recipient on a simplified invoice', function (): void {
     $data = InvoiceData::make('Coffee')->to(Recipient::spanish('A15022510', 'Acme'))->simplified()->lines([TaxLine::vat(100, rate: 10)]);
 
-    expect(fn () => $data->toArray())->toThrow(InvalidArgumentException::class, 'A simplified invoice (F2) has no recipient.');
+    expect(fn () => $data->toArray())->toThrow(InvalidArgumentException::class, 'An F2 invoice has no recipient: simplified invoices (F2) and their corrective invoices (R5) never name one.');
 });
+
+it('refuses a recipient on the corrective invoice of a simplified one', function (): void {
+    $data = InvoiceData::make('Refund')
+        ->to(Recipient::spanish('A15022510', 'Acme'))
+        ->lines([TaxLine::vat(-1000, rate: 21)])
+        ->correcting(issuedInvoice('7', '2026-11-02', simplified: true));
+
+    expect(fn () => $data->toArray())->toThrow(InvalidArgumentException::class, 'An R5 invoice has no recipient: simplified invoices (F2) and their corrective invoices (R5) never name one.');
+});
+
+it('refuses a VAT rate with more than two decimals', function (): void {
+    expect(fn () => TaxLine::vat(1000, rate: '21.001'))
+        ->toThrow(InvalidArgumentException::class, 'A VAT rate has at most two decimals; 21.001 has more.');
+});
+
+it('refuses an E3 line, whose regime key is not confirmed: :dataset', function (?ExemptionReason $reason, string $default): void {
+    config(['verifactu.exemption_reason' => $default]);
+
+    expect(fn (): TaxLine => TaxLine::exempt(1000, $reason))
+        ->toThrow(InvalidArgumentException::class, 'Exemption reason E3 (article 22) is not supported yet');
+})->with([
+    'given' => [ExemptionReason::ExportLikeOperations, 'E1'],
+    'from the config' => [null, 'E3'],
+]);
 
 it('describes a foreign customer by their document', function (): void {
     expect(Recipient::foreign('Jean Dupont', 'FR', ForeignIdType::EuVatNumber, 'FR40303265045')->toArray())

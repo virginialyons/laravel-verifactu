@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vlec\Verifactu;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Arr;
 use LogicException;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\Events\InvoiceAccepted;
@@ -103,13 +104,11 @@ trait IssuesVerifactuInvoices
     {
         $previousStatus = $this->getAttribute(static::verifactuColumn('status'));
 
-        $attributes = [];
-
-        foreach (['uuid', 'status', 'invoice_number', 'number', 'issue_date', 'verification_url', 'qr_code'] as $field) {
-            if (array_key_exists($field, $invoice)) {
-                $attributes[static::verifactuColumn($field)] = $invoice[$field];
-            }
-        }
+        // A field the answer leaves out, such as the QR code in a webhook's list, keeps its column's value.
+        $attributes = Arr::mapWithKeys(
+            Arr::only($invoice, ['uuid', 'status', 'invoice_number', 'number', 'issue_date', 'verification_url', 'qr_code']),
+            fn (mixed $value, string $field): array => [static::verifactuColumn($field) => $value],
+        );
 
         $this->forceFill($attributes)->save();
 

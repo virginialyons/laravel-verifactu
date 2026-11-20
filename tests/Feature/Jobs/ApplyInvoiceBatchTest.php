@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
@@ -118,6 +119,17 @@ it('applies a batch only once', function (): void {
     Event::assertDispatchedTimes(InvoiceBatchCompleted::class, 1);
 });
 
+it('does nothing for a batch another job applied after this one was queued', function (): void {
+    $batch = queuedBatch();
+    $job = (new ApplyInvoiceBatch($batch))->withFakeQueueInteractions();
+    $batch->update(['status' => InvoiceBatchStatus::Completed]);
+    Http::fake();
+
+    $job->handle(app(Client::class));
+
+    Http::assertNothingSent();
+});
+
 it('leaves a batch still running for later', function (): void {
     $invoices = Invoice::factory()->count(2)->create();
     $batch = queuedBatch();
@@ -170,7 +182,7 @@ it('applies nothing when a page cannot be read, and is released to read them all
     Http::fake([
         'verifactu.test/api/v1/invoice-batches/'.BatchUuid => Http::response(['data' => serviceBatch(['status' => 'completed', 'total' => 150])]),
         'verifactu.test/api/v1/invoice-batches/'.BatchUuid.'/items*' => Http::sequence()
-            ->push(['data' => array_slice(batchItems($invoices), 0, 100), 'meta' => ['current_page' => 1, 'last_page' => 2]])
+            ->push(['data' => Arr::take(batchItems($invoices), 100), 'meta' => ['current_page' => 1, 'last_page' => 2]])
             ->push(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '7']),
     ]);
 

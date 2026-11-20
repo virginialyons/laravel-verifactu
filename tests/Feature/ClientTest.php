@@ -26,6 +26,8 @@ it('sends each operation to its endpoint with the token', function (Closure $cal
             ->and($request->header('Accept'))->toBe(['application/json']);
 
         if ($method === 'GET') {
+            expect($request->hasHeader('Idempotency-Key'))->toBeFalse();
+
             return true;
         }
 
@@ -106,6 +108,7 @@ it('retries a :dataset with the same Idempotency-Key', function (Closure $failur
     'connection error' => [fn (ResponseSequence $sequence) => $sequence->pushFailedConnection(), 1],
     '500' => [fn (ResponseSequence $sequence) => $sequence->push(['message' => 'Server error.', 'code' => 'record_generation_failed'], 500), 1],
     '503 with Retry-After' => [fn (ResponseSequence $sequence) => $sequence->push(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '3']), 3],
+    '503 with the longest Retry-After waited out' => [fn (ResponseSequence $sequence) => $sequence->push(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '5']), 5],
     '429 with Retry-After' => [fn (ResponseSequence $sequence) => $sequence->push(['message' => 'Too many.', 'code' => 'too_many_requests'], 429, ['Retry-After' => '2']), 2],
     '409 idempotency_key_in_progress' => [fn (ResponseSequence $sequence) => $sequence->push(['message' => 'In progress.', 'code' => 'idempotency_key_in_progress'], 409), 1],
 ]);
@@ -168,6 +171,19 @@ it('throws the last answer with its Retry-After once the retries run out', funct
     Http::assertSentCount(3);
 });
 
+it('throws at once when the service asks for a longer wait than a call waits out', function (): void {
+    Sleep::fake();
+    Http::fake(['verifactu.test/api/v1/invoices/uuid-1/cancellation' => Http::response(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '6'])]);
+
+    expect(fn () => Verifactu::cancelInvoice('uuid-1'))
+        ->toThrow(function (VerifactuException $exception): void {
+            expect($exception->retryAfter)->toBe(6)
+                ->and($exception->isRetryable())->toBeTrue();
+        });
+    Http::assertSentCount(1);
+    Sleep::assertNeverSlept();
+});
+
 it('throws a retryable exception when the service never answers', function (): void {
     Sleep::fake();
     Http::fake(['verifactu.test/api/v1/invoices/uuid-1' => Http::failedConnection()]);
@@ -185,6 +201,27 @@ it('falls back to a plain message for an answer with only a status', function ()
 
     expect(fn () => Verifactu::getInvoice('uuid-1'))
         ->toThrow(VerifactuException::class, 'The Verifactu service answered 404.');
+});
+
+it('throws for an answer that is not the API\'s: :dataset', function (Closure $answer): void {
+    Http::fake(['verifactu.test/api/v1/invoices' => $answer()]);
+
+    expect(fn () => Verifactu::createInvoice(['description' => 'Order 1']))->toThrow(VerifactuException::class);
+    Http::assertSentCount(1);
+})->with([
+    'a proxy\'s page with a 200' => [fn () => Http::response('<html>Maintenance</html>', 200, ['Content-Type' => 'text/html'])],
+    'a redirect, never followed' => [fn () => Http::response('', 302, ['Location' => 'https://verifactu.test/api/v1/invoices?page=1'])],
+]);
+
+it('waits at least a second when the service asks for no wait', function (): void {
+    Sleep::fake();
+    Http::fake(['verifactu.test/api/v1/invoices/uuid-1' => Http::sequence()
+        ->push(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '0'])
+        ->push(['data' => serviceInvoice()])]);
+
+    Verifactu::getInvoice('uuid-1');
+
+    Sleep::assertSequence([Sleep::for(1)->second()]);
 });
 
 it('makes no retry when retries are set to zero', function (): void {
@@ -216,6 +253,7 @@ it('refuses to call the service without a usable URL or token', function (string
     'a missing URL' => ['verifactu.url', null, 'Set VERIFACTU_URL'],
     'an empty URL' => ['verifactu.url', '', 'Set VERIFACTU_URL'],
     'a URL without a scheme' => ['verifactu.url', 'verifactu.example.com', 'Set VERIFACTU_URL'],
+    'a plain HTTP URL, which would send the token in clear' => ['verifactu.url', 'http://verifactu.test', 'Set VERIFACTU_URL to the Verifactu service\'s HTTPS host'],
     'a missing token' => ['verifactu.token', null, 'Set VERIFACTU_TOKEN'],
     'an empty token' => ['verifactu.token', '', 'Set VERIFACTU_TOKEN'],
 ]);

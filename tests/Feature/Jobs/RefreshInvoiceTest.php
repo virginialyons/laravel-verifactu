@@ -40,6 +40,19 @@ it('stores the invoice as the service has it and fires the event of its new stat
     Event::assertDispatched(InvoiceRejected::class, fn (InvoiceRejected $event): bool => $event->invoice->is($invoice) && $event->errorCode === '1105');
 });
 
+it('fires no status event a read that ran meanwhile already fired', function (): void {
+    $invoice = Invoice::factory()->issued()->create(['verifactu_uuid' => 'uuid-1']);
+    $job = (new RefreshInvoice($invoice))->withFakeQueueInteractions();
+    // Another worker's read stored the decision after this job loaded the invoice.
+    Invoice::whereKey($invoice->id)->update(['aeat_status' => 'rejected']);
+    Event::fake([InvoiceRejected::class]);
+    Http::fake(['verifactu.test/api/v1/invoices/uuid-1' => Http::response(['data' => serviceInvoice(['uuid' => 'uuid-1', 'status' => 'rejected'])])]);
+
+    $job->handle(app(Client::class));
+
+    Event::assertNotDispatched(InvoiceRejected::class);
+});
+
 it('releases the job after a retryable answer, with one request per attempt', function (): void {
     $invoice = Invoice::factory()->issued()->create();
     Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => Http::response(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '7'])]);
@@ -73,6 +86,8 @@ it('waits for a read of the same invoice running on another worker', function ()
     $invoice = Invoice::factory()->issued()->create();
     $job = new RefreshInvoice($invoice);
     Cache::lock((new WithoutOverlapping($invoice->verifactuReference()))->getLockKey($job), 60)->get();
+
+    Http::fake();
 
     dispatch($job);
     $this->artisan('queue:work', ['--once' => true])->assertSuccessful();

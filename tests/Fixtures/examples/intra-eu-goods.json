@@ -1,0 +1,28 @@
+{
+    "slug": "intra-eu-goods",
+    "title": "Goods to a business in another EU country",
+    "description": "An exempt intra-community supply of goods to a business in another EU country (entrega intracomunitaria de bienes), exemption E5 with the customer's VAT number.",
+    "request": {
+        "method": "POST",
+        "path": "/api/v1/invoices",
+        "body": {
+            "description": "Factura B2B intracomunitaria - Venta de bienes",
+            "recipient": {
+                "name": "Nombre destinatario",
+                "country_code": "BE",
+                "id_type": "02",
+                "id": "BE0404621642"
+            },
+            "lines": [
+                {
+                    "tax_base": "200",
+                    "exemption_reason": "E5"
+                }
+            ],
+            "total_amount": "200"
+        }
+    },
+    "answer": {
+        "status": 201
+    }
+}

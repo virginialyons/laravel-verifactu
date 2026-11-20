@@ -25,7 +25,7 @@ use Vlec\Verifactu\Models\InvoiceBatch;
  * invoice and fires InvoiceIssued, fires InvoiceNotIssued for each failed
  * one, then InvoiceBatchCompleted. A batch still running is left for later.
  *
- * @phpstan-type Item array{external_reference: ?string, result: ?string, invoice?: array<string, mixed>, error: ?array{code: string, message: string}}
+ * @phpstan-type Item array{external_reference: ?string, result: ?string, invoice: ?array<string, mixed>, error: ?array{code: string, message: string}}
  */
 class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
 {
@@ -33,18 +33,12 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
     use RetriesThroughTheQueue;
 
     /**
-     * A lock left by a job that was lost expires within the hour.
+     * The lock outlasts the 24 hours of retries, so a second job never
+     * applies the batch alongside one waiting out an outage.
      */
-    public int $uniqueFor = 3600;
+    public int $uniqueFor = 90000;
 
-    public function __construct(public InvoiceBatch $batch)
-    {
-        $queue = config('verifactu.queue');
-
-        if (is_string($queue)) {
-            $this->onQueue($queue);
-        }
-    }
+    public function __construct(public InvoiceBatch $batch) {}
 
     public function uniqueId(): string
     {
@@ -53,6 +47,9 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
 
     public function handle(Client $client): void
     {
+        // Loaded when the job was queued: another job may have applied the batch since.
+        $this->batch->refresh();
+
         if ($this->batch->isApplied()) {
             return;
         }
@@ -63,7 +60,7 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
             /** @var array{status: string, total: int, succeeded: int, failed: int} $batch */
             $batch = $client->getInvoiceBatch($this->batch->uuid);
 
-            if (! InvoiceBatchStatus::from($batch['status'])->isComplete()) {
+            if (InvoiceBatchStatus::from($batch['status'])->isNotComplete()) {
                 return;
             }
 
@@ -107,7 +104,7 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
      */
     protected function apply(array $items): void
     {
-        $invoices = $this->invoices(collect($items)->map(fn (array $item): ?string => $item['external_reference']));
+        $invoices = $this->invoices(Collection::make($items)->map(fn (array $item): ?string => $item['external_reference']));
 
         foreach ($items as $item) {
             $invoice = $invoices->get((string) $item['external_reference']);
@@ -117,10 +114,12 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
                 continue;
             }
 
-            if ($item['result'] === 'issued' && isset($item['invoice'])) {
+            if ($item['result'] === 'issued' && $item['invoice'] !== null) {
                 $invoice->storeVerifactuInvoice($item['invoice']);
 
                 InvoiceIssued::dispatch($invoice);
+
+                continue;
             }
 
             if ($item['result'] !== 'failed' || $item['error'] === null) {

@@ -6,6 +6,8 @@ namespace Vlec\Verifactu;
 
 use BcMath\Number;
 use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Support\Arr;
+use InvalidArgumentException;
 use RoundingMode;
 
 /**
@@ -20,13 +22,20 @@ class TaxLine implements Arrayable
     ) {}
 
     /**
-     * A line subject to VAT at the given rate in percent, such as 21.
+     * A line subject to VAT at the given rate in percent, such as 21 or '5.5'.
      *
      * @param  int|numeric-string  $rate
      */
     public static function vat(int $baseCents, int|string $rate): self
     {
-        return new self($baseCents, rate: new Number($rate));
+        $rate = new Number($rate);
+
+        // The API takes at most two decimals, and lines are grouped by the rate to two decimals.
+        if ($rate->scale > 2) {
+            throw new InvalidArgumentException("A VAT rate has at most two decimals; {$rate} has more.");
+        }
+
+        return new self($baseCents, rate: $rate);
     }
 
     /**
@@ -36,11 +45,17 @@ class TaxLine implements Arrayable
     {
         $reason ??= ExemptionReason::from(config()->string('verifactu.exemption_reason'));
 
+        // AEAT refuses E3 under the default regime key 01 ("Validaciones y errores" v1.2.2, §15.5),
+        // and neither AEAT nor the service says which key it takes: refused before it gets a number.
+        if ($reason === ExemptionReason::ExportLikeOperations) {
+            throw new InvalidArgumentException('Exemption reason E3 (article 22) is not supported yet: AEAT refuses it under the general regime key 01, and the key it takes is not confirmed.');
+        }
+
         return new self($baseCents, exemptionReason: $reason);
     }
 
     /**
-     * The tax, base × rate / 100, rounded half up to the cent.
+     * The tax, base × rate / 100, rounded half away from zero to the cent.
      */
     public function taxCents(): int
     {
@@ -85,7 +100,11 @@ class TaxLine implements Arrayable
         $base = self::decimal($this->baseCents);
 
         if ($this->exemptionReason !== null) {
-            return ['tax_base' => $base, 'exemption_reason' => $this->exemptionReason->value];
+            return Arr::whereNotNull([
+                'tax_base' => $base,
+                'regime_key' => $this->exemptionReason->regimeKey(),
+                'exemption_reason' => $this->exemptionReason->value,
+            ]);
         }
 
         return [

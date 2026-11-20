@@ -29,14 +29,7 @@ class RefreshInvoice implements ShouldBeUniqueUntilProcessing, ShouldQueue
      */
     public int $uniqueFor = 3600;
 
-    public function __construct(public Model&VerifactuInvoice $invoice)
-    {
-        $queue = config('verifactu.queue');
-
-        if (is_string($queue)) {
-            $this->onQueue($queue);
-        }
-    }
+    public function __construct(public Model&VerifactuInvoice $invoice) {}
 
     public function uniqueId(): string
     {
@@ -56,6 +49,9 @@ class RefreshInvoice implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public function handle(Client $client): void
     {
+        // Loaded before the overlap lock was taken: the read that ran meanwhile may have stored a newer status.
+        $this->invoice->refresh();
+
         try {
             $invoice = $client->withoutRetries()->getInvoice($this->invoice->verifactuUuid());
         } catch (VerifactuException $exception) {

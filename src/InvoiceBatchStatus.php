@@ -21,4 +21,9 @@ enum InvoiceBatchStatus: string
     {
         return $this === self::Completed || $this === self::CompletedWithErrors;
     }
+
+    public function isNotComplete(): bool
+    {
+        return ! $this->isComplete();
+    }
 }

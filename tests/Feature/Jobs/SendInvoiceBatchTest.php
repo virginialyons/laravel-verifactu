@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Vlec\Verifactu\Client;
 use Vlec\Verifactu\Events\InvoiceNotIssued;
+use Vlec\Verifactu\Exceptions\VerifactuException;
 use Vlec\Verifactu\Facades\Verifactu;
 use Vlec\Verifactu\InvoiceBatchStatus;
 use Vlec\Verifactu\Jobs\SendInvoiceBatch;
@@ -86,11 +87,48 @@ it('is released to store the batch on the retry when the database fails after th
     $invoices = Invoice::factory()->count(2)->create();
     Event::fake([InvoiceNotIssued::class]);
     Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::response(['data' => serviceBatch()], 202)]);
-    Schema::drop('verifactu_invoice_batches');
+    Schema::rename('verifactu_invoice_batches', 'batches_away');
 
-    sendBatchJob($invoices)->assertReleased(10);
+    $job = sendBatchJob($invoices)->assertReleased(10);
 
+    Schema::rename('batches_away', 'verifactu_invoice_batches');
+    $job->withFakeQueueInteractions()->handle(app(Client::class));
+
+    expect(InvoiceBatch::sole())->uuid->toBe(serviceBatch()['uuid'])->status->toBe(InvoiceBatchStatus::Queued);
+    expect(Http::recorded()->map(fn (array $pair): array => $pair[0]->header('Idempotency-Key'))->unique()->all())->toBe([[$job->idempotencyKey]]);
     Event::assertNotDispatched(InvoiceNotIssued::class);
+});
+
+it('keeps the batch queued until it is applied, whatever the service first answers', function (): void {
+    Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::response(['data' => serviceBatch(['status' => 'completed'])], 202)]);
+
+    sendBatchJob(Invoice::factory()->count(2)->create());
+
+    expect(InvoiceBatch::sole()->status)->toBe(InvoiceBatchStatus::Queued);
+});
+
+it('sends an invoice given twice once', function (): void {
+    Queue::fake([SendInvoiceBatch::class]);
+    $invoice = Invoice::factory()->create();
+
+    // A copy loaded on its own, with a relation, is still the same invoice.
+    $copy = Invoice::query()->find($invoice->id)->setRelation('notes', collect());
+
+    Verifactu::sendBatch([$invoice, $copy, Invoice::factory()->create()]);
+
+    Queue::assertPushed(SendInvoiceBatch::class, fn (SendInvoiceBatch $job): bool => $job->invoices->count() === 2);
+});
+
+it('reports as not issued only the invoices still not on Verifactu', function (): void {
+    $invoices = Invoice::factory()->count(2)->create();
+    Event::fake([InvoiceNotIssued::class]);
+    $job = new SendInvoiceBatch($invoices);
+    $invoices[0]->storeVerifactuInvoice(serviceInvoice());
+
+    $job->failed(new VerifactuException('Refused.', 422, 'validation_failed'));
+
+    Event::assertDispatchedTimes(InvoiceNotIssued::class, 1);
+    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1]));
 });
 
 it('fails on a refusal and fires InvoiceNotIssued for each invoice', function (): void {

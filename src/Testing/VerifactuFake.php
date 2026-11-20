@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace Vlec\Verifactu\Testing;
 
+use BcMath\Number;
 use Closure;
 use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Client\Request;
+use Illuminate\Http\Client\Response;
+use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Http;
@@ -16,6 +21,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Testing\Fakes\Fake;
 use LogicException;
 use PHPUnit\Framework\Assert as PHPUnit;
+use Psr\Http\Message\ResponseInterface;
 use Vlec\Verifactu\Client;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\InvoiceStatus;
@@ -27,27 +33,58 @@ use Vlec\Verifactu\TaxIdCheckResult;
 
 /**
  * Plays the Verifactu service in the app's tests: it answers the package's
- * requests like the service, so the real jobs, trait and events run. It
- * numbers invoices in order, keeps them in memory and completes batches at
- * once; decide() plays AEAT's answer.
+ * requests like the service, refusals included, so the real jobs, events
+ * and IssuesVerifactuInvoices concern run. It numbers invoices in order,
+ * keeps them in memory and completes batches at once; decide() plays
+ * AEAT's answer. The requests it doesn't play, such as an invoice's XML,
+ * are left to the app's own Http::fake(), or reported as stray.
  *
  * Its invoices live in the test's memory, so the jobs must run in the test:
  * on the sync queue, not with Queue::fake(). Call Verifactu::fake() before
  * any catch-all Http::fake(), whose answers would come first.
+ *
+ * @phpstan-type Invoice array{uuid: string, environment: string|null, status: string, series: string, number: string, invoice_number: string, issue_date: string, total_amount: numeric-string, external_reference: string|null, verification_url: string, qr_code: string, hash: string|null, aeat: Aeat}
+ * @phpstan-type Aeat array{verification_code: string|null, error_code: string|null, error_message: string|null, registered_at: string|null}
+ * @phpstan-type Refusal array{status: int, code: string, message: string, errors?: array<string, list<string>>}
+ * @phpstan-type BillingRecord array{uuid: string, type: string, status: string, hash: string, generated_at: string}
+ *
+ * @phpstan-import-type Row from InvoiceListQuery
  */
 class VerifactuFake extends Client implements Fake
 {
+    protected const string Series = 'FACT';
+
+    protected const string RecipientNotIdentified = 'AEAT does not know this tax ID under this name.';
+
     /**
      * A 1×1 PNG, so an app that prints the QR code gets a real image.
      */
-    protected const string RecipientNotIdentified = 'AEAT does not know this tax ID under this name.';
-
     protected const string QrCode = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+    /**
+     * What a correction may change on each line, besides the description.
+     */
+    protected const array CorrectableLineFields = ['regime_key', 'operation_qualification', 'exemption_reason'];
+
+    /**
+     * A tax line as the service answers it, with its defaults.
+     */
+    protected const array TaxLine = [
+        'tax_type' => '01',
+        'regime_key' => '01',
+        'operation_qualification' => null,
+        'exemption_reason' => null,
+        'tax_base' => null,
+        'tax_rate' => null,
+        'tax_amount' => null,
+        'equivalence_surcharge_rate' => null,
+        'equivalence_surcharge_amount' => null,
+    ];
 
     /**
      * The issued invoices, by uuid.
      *
-     * @var array<string, array<string, mixed>>
+     * @var array<string, Invoice>
      */
     protected array $invoices = [];
 
@@ -59,9 +96,9 @@ class VerifactuFake extends Client implements Fake
     protected array $requests = [];
 
     /**
-     * The uuids of the invoices corrected.
+     * The body of each invoice's last correction, by uuid.
      *
-     * @var list<string>
+     * @var array<string, array<mixed>>
      */
     protected array $corrections = [];
 
@@ -73,11 +110,25 @@ class VerifactuFake extends Client implements Fake
     protected array $cancellations = [];
 
     /**
+     * Each invoice's AEAT records, oldest first, by uuid.
+     *
+     * @var array<string, non-empty-list<BillingRecord>>
+     */
+    protected array $records = [];
+
+    /**
      * The batches, completed, with their items, by uuid.
      *
      * @var array<string, array{batch: array<string, mixed>, items: array<int, array<string, mixed>>}>
      */
     protected array $batches = [];
+
+    /**
+     * The first answer to each Idempotency-Key, with the request it answered.
+     *
+     * @var array<string, array{request: string, status: int, body: array<mixed>}>
+     */
+    protected array $replies = [];
 
     protected int $lastNumber = 0;
 
@@ -101,7 +152,7 @@ class VerifactuFake extends Client implements Fake
         $url = Str::finish(config()->string('verifactu.url'), '/');
 
         // Clones from withoutRetries() send to this closure, so the state stays on this instance.
-        Http::fake(["{$url}api/v1/*" => fn (Request $request): PromiseInterface => $this->answer($request)]);
+        Http::fake(["{$url}api/v1/*" => fn (Request $request): ?PromiseInterface => $this->answer($request)]);
     }
 
     /**
@@ -122,28 +173,61 @@ class VerifactuFake extends Client implements Fake
     }
 
     /**
-     * Plays AEAT's answer for the invoice, then refreshes it, as the
-     * invoices.updated webhook would.
+     * Plays AEAT's answer to the invoice's last record, then refreshes the
+     * invoice, as the invoices.updated webhook would. AEAT accepts, accepts
+     * with errors or rejects a record of the invoice, and registers a
+     * cancellation: decide Cancelled, or Accepted, after cancelling it.
      */
     public function decide(Model&VerifactuInvoice $invoice, InvoiceStatus $status, ?string $errorCode = null, ?string $errorMessage = null): static
     {
+        $reference = $invoice->verifactuReference();
         $uuid = $this->uuidOf($invoice);
 
         if ($uuid === null) {
-            throw new LogicException("The invoice [{$invoice->verifactuReference()}] is not on the fake Verifactu: issue it first.");
+            throw new LogicException("The invoice [{$reference}] is not on the fake Verifactu: issue it first.");
         }
 
-        if ($this->invoices[$uuid]['status'] !== InvoiceStatus::Pending->value) {
-            throw new LogicException("Nothing of the invoice [{$invoice->verifactuReference()}] awaits AEAT's answer: correct or cancel it first.");
+        $records = $this->records[$uuid];
+        $record = $records[array_key_last($records)];
+
+        if ($record['status'] !== 'pending') {
+            throw new LogicException("Nothing of the invoice [{$reference}] awaits AEAT's answer: correct or cancel it first.");
         }
 
-        $this->invoices[$uuid]['status'] = $status->value;
-        $this->invoices[$uuid]['aeat'] = [
-            'verification_code' => null,
-            'error_code' => $errorCode,
-            'error_message' => $errorMessage,
-            'registered_at' => Date::now()->toIso8601String(),
-        ];
+        if ($status === InvoiceStatus::Pending) {
+            throw new LogicException('AEAT answers accepted, accepted with errors or rejected, or registers a cancellation: pending is no answer.');
+        }
+
+        $cancellation = $record['type'] === 'cancellation';
+
+        if ($status === InvoiceStatus::Cancelled && ! $cancellation) {
+            throw new LogicException("No cancellation of the invoice [{$reference}] awaits AEAT's answer: cancel it first.");
+        }
+
+        if ($cancellation && $status !== InvoiceStatus::Cancelled && $status !== InvoiceStatus::Accepted) {
+            throw new LogicException("The cancellation of the invoice [{$reference}] awaits AEAT's answer: decide Cancelled.");
+        }
+
+        if ($errorCode !== null && $status !== InvoiceStatus::AcceptedWithErrors && $status !== InvoiceStatus::Rejected) {
+            throw new LogicException('AEAT gives an error code only when it accepts a record with errors or rejects it.');
+        }
+
+        $recordStatus = $status->value;
+
+        if ($cancellation) {
+            $status = InvoiceStatus::Cancelled;
+            $recordStatus = InvoiceStatus::Accepted->value;
+        }
+
+        $aeat = ['verification_code' => null, 'error_code' => $errorCode, 'error_message' => $errorMessage, 'registered_at' => null];
+
+        if ($status !== InvoiceStatus::Rejected) {
+            $aeat['verification_code'] = 'A-'.Str::upper(Str::random(14));
+            $aeat['registered_at'] = $this->now()->toIso8601String();
+        }
+
+        $this->invoices[$uuid] = [...$this->invoices[$uuid], 'status' => $status->value, 'aeat' => $aeat];
+        $this->records[$uuid][array_key_last($records)] = [...$record, 'status' => $recordStatus];
 
         RefreshInvoice::dispatch($invoice);
 
@@ -208,7 +292,7 @@ class VerifactuFake extends Client implements Fake
         $uuid = $this->uuidOf($invoice);
 
         PHPUnit::assertTrue(
-            $uuid !== null && in_array($uuid, $this->corrections, true),
+            $uuid !== null && isset($this->corrections[$uuid]),
             "The invoice [{$invoice->verifactuReference()}] was not corrected on Verifactu.",
         );
     }
@@ -223,53 +307,89 @@ class VerifactuFake extends Client implements Fake
         );
     }
 
-    protected function answer(Request $request): PromiseInterface
+    /**
+     * The service's answer to a request it plays, or null for the next
+     * Http::fake() stub to answer.
+     */
+    protected function answer(Request $request): ?PromiseInterface
     {
-        $path = Str::of($request->url())->before('?')->after('/api/v1/')->toString();
-        $method = $request->method();
-        $data = $request->data();
+        $segments = Str::of(Str::after($request->uri()->path(), 'api/v1/'))->explode('/');
+        $uuid = (string) $segments->get(1);
 
-        if ($method === 'POST' && $path === 'invoices') {
-            return $this->issue($data);
+        if ($segments->has(1)) {
+            $segments->put(1, '{uuid}');
         }
 
-        if ($method === 'GET' && $path === 'invoices') {
-            return $this->list($data);
+        $route = "{$request->method()} {$segments->implode('/')}";
+
+        $handler = match ($route) {
+            'GET invoices' => fn (): PromiseInterface => $this->list($request),
+            'POST invoices' => fn (): PromiseInterface => $this->issue($request->data()),
+            'GET invoices/{uuid}' => fn (): PromiseInterface => $this->show($uuid),
+            'POST invoices/{uuid}/corrections' => fn (): PromiseInterface => $this->correct($uuid, $request->data()),
+            'POST invoices/{uuid}/cancellation' => fn (): PromiseInterface => $this->cancel($uuid),
+            'POST invoice-batches' => fn (): PromiseInterface => $this->issueBatch($request->data()),
+            'GET invoice-batches/{uuid}' => fn (): PromiseInterface => $this->showBatch($uuid),
+            'GET invoice-batches/{uuid}/items' => fn (): PromiseInterface => $this->batchItems($uuid, $request),
+            'POST tax-id-checks' => fn (): PromiseInterface => $this->answerTaxIdCheck($request->data()),
+            default => null,
+        };
+
+        if ($handler === null) {
+            return null;
         }
 
-        if ($method === 'POST' && Str::is('invoices/*/corrections', $path)) {
-            return $this->correct(Str::between($path, 'invoices/', '/corrections'), $data);
+        if ($this->environment() === null) {
+            return Http::response(['message' => 'Unauthenticated.'], 401);
         }
 
-        if ($method === 'POST' && Str::is('invoices/*/cancellation', $path)) {
-            return $this->cancel(Str::between($path, 'invoices/', '/cancellation'));
+        if ($request->method() === 'GET' || $route === 'POST tax-id-checks') {
+            return $handler();
         }
 
-        if ($method === 'GET' && Str::is('invoices/*', $path)) {
-            return $this->show(Str::after($path, 'invoices/'));
+        return $this->idempotently($request, $route, $handler);
+    }
+
+    /**
+     * Answers a POST under its Idempotency-Key: the same key with the same
+     * request replays the first answer, refusals included; with another
+     * request it is refused.
+     *
+     * @param  Closure(): PromiseInterface  $handler
+     */
+    protected function idempotently(Request $request, string $route, Closure $handler): PromiseInterface
+    {
+        $key = Arr::first($request->header('Idempotency-Key'));
+
+        if (! is_string($key) && $route === 'POST invoice-batches') {
+            return $this->refuse($this->refusal(422, 'idempotency_key_required', 'This endpoint needs an Idempotency-Key header, so a retry never sends the same work twice.'));
         }
 
-        if ($method === 'POST' && $path === 'invoice-batches') {
-            return $this->issueBatch($data);
+        if (! is_string($key)) {
+            return $handler();
         }
 
-        if ($method === 'GET' && Str::is('invoice-batches/*/items', $path)) {
-            return $this->batchItems(Str::between($path, 'invoice-batches/', '/items'), $data);
+        $fingerprint = "{$route} {$request->uri()->path()} {$request->body()}";
+        $reply = $this->replies[$key] ?? null;
+
+        if ($reply !== null && $reply['request'] !== $fingerprint) {
+            return $this->refuse($this->refusal(422, 'idempotency_key_reused', 'This Idempotency-Key was already used with a different request. Use a new key for a new request.'));
         }
 
-        if ($method === 'GET' && Str::is('invoice-batches/*', $path)) {
-            return $this->showBatch(Str::after($path, 'invoice-batches/'));
+        if ($reply !== null) {
+            return Http::response($reply['body'], $reply['status'], ['Idempotent-Replayed' => 'true']);
         }
 
-        if ($method === 'POST' && $path === 'tax-id-checks') {
-            return Http::response(['data' => [
-                'tax_id' => $data['tax_id'] ?? null,
-                'result' => $this->taxIdCheck->result->value,
-                'official_name' => $this->taxIdCheck->officialName,
-            ]]);
-        }
+        /** @var ResponseInterface $answer */
+        $answer = $handler()->wait();
+        $response = new Response($answer);
 
-        return $this->notFound();
+        /** @var array<mixed> $body */
+        $body = $response->json();
+
+        $this->replies[$key] = ['request' => $fingerprint, 'status' => $response->status(), 'body' => $body];
+
+        return Http::response($body, $response->status());
     }
 
     /**
@@ -277,31 +397,35 @@ class VerifactuFake extends Client implements Fake
      */
     protected function issue(array $body): PromiseInterface
     {
-        if ($this->referenceIsTaken($body)) {
-            return $this->error(409, 'external_reference_already_used', 'An invoice with this external reference was already issued.');
-        }
+        $refusal = $this->issueRefusal($body);
 
-        if ($this->recipientIsNotIdentified($body)) {
-            return $this->error(422, 'recipient_not_identified', self::RecipientNotIdentified);
+        if ($refusal !== null) {
+            return $this->refuse($refusal);
         }
 
         return Http::response(['data' => $this->store($body)], 201);
     }
 
-    /**
-     * @param  array<mixed>  $query
-     */
-    protected function list(array $query): PromiseInterface
+    protected function list(Request $request): PromiseInterface
     {
-        $invoices = Collection::make($this->invoices);
+        $query = new InvoiceListQuery($request->uri()->query()->all());
+        $refusal = $query->refusal();
 
-        $reference = Arr::get($query, 'filter.external_reference');
-
-        if (is_string($reference)) {
-            $invoices = $invoices->where('external_reference', $reference);
+        if ($refusal !== null) {
+            return Http::response($refusal, 400);
         }
 
-        return $this->page($invoices->map(fn (array $invoice): array => Arr::except($invoice, 'qr_code'))->values()->all(), 1);
+        $rows = Collection::make($this->invoices)->keys()->flip()->map($this->row(...))->all();
+
+        $invoices = $query->apply($rows)
+            ->map(fn (array $row, string $uuid): array => [
+                ...Arr::except($row['invoice'], 'qr_code'),
+                ...Arr::only($this->relations($uuid), $query->includes()),
+            ])
+            ->values()
+            ->all();
+
+        return Http::response($this->page($request, $invoices, $query->pageNumber(), $query->pageSize(), 'page.number'));
     }
 
     protected function show(string $uuid): PromiseInterface
@@ -318,32 +442,43 @@ class VerifactuFake extends Client implements Fake
      */
     protected function correct(string $uuid, array $body): PromiseInterface
     {
-        $refusal = $this->refuseChange($uuid);
+        if (! isset($this->invoices[$uuid])) {
+            return $this->notFound();
+        }
+
+        $refusal = $this->invalidity($body)
+            ?? $this->changeRefusal($uuid)
+            ?? $this->fiscalChange($uuid, $body)
+            ?? $this->recipientRefusal($body);
 
         if ($refusal !== null) {
-            return $refusal;
+            return $this->refuse($refusal);
         }
 
-        if ($this->recipientIsNotIdentified($body)) {
-            return $this->error(422, 'recipient_not_identified', self::RecipientNotIdentified);
-        }
+        $this->corrections[$uuid] = $body;
 
-        $this->corrections[] = $uuid;
+        $this->sendRecord($uuid, 'registration');
 
-        return $this->awaitAeat($uuid);
+        return Http::response(['data' => $this->invoices[$uuid]], 201);
     }
 
     protected function cancel(string $uuid): PromiseInterface
     {
-        $refusal = $this->refuseChange($uuid);
+        if (! isset($this->invoices[$uuid])) {
+            return $this->notFound();
+        }
+
+        $refusal = $this->changeRefusal($uuid);
 
         if ($refusal !== null) {
-            return $refusal;
+            return $this->refuse($refusal);
         }
 
         $this->cancellations[] = $uuid;
 
-        return $this->awaitAeat($uuid);
+        $this->sendRecord($uuid, 'cancellation');
+
+        return Http::response(['data' => $this->invoices[$uuid]], 201);
     }
 
     /**
@@ -354,41 +489,43 @@ class VerifactuFake extends Client implements Fake
      */
     protected function issueBatch(array $body): PromiseInterface
     {
-        /** @var list<array<string, mixed>> $invoices */
-        $invoices = $body['invoices'] ?? [];
-
-        $references = Collection::make($invoices)->pluck('external_reference')->filter();
-
-        if ($references->duplicates()->isNotEmpty()) {
-            return $this->error(422, 'validation_failed', 'Items that have an external_reference need distinct ones.');
+        if (! is_array($body['invoices'] ?? null)) {
+            return $this->refuse($this->invalid('validation_failed', 'invoices', 'The invoices field is required.'));
         }
 
-        $items = Collection::make($invoices)->map(function (array $invoice, int $index): array {
+        /** @var Collection<int, array<mixed>> $invoices */
+        $invoices = Collection::make($body['invoices'])->values();
+
+        $repeated = $invoices->pluck('external_reference')->filter()->duplicatesStrict();
+
+        if ($repeated->isNotEmpty()) {
+            $message = 'Items that have an external_reference need distinct ones.';
+
+            $errors = $invoices
+                ->filter(fn (array $invoice): bool => $repeated->containsStrict($invoice['external_reference'] ?? null))
+                ->mapWithKeys(fn (array $invoice, int $index): array => ["invoices.{$index}.external_reference" => [$message]])
+                ->all();
+
+            return $this->refuse($this->refusal(422, 'validation_failed', $message, $errors));
+        }
+
+        $items = $invoices->map(function (array $invoice, int $index): array {
             $item = ['index' => $index, 'external_reference' => $invoice['external_reference'] ?? null];
+            $refusal = $this->issueRefusal($invoice);
 
-            if ($this->referenceIsTaken($invoice)) {
-                return [...$item, 'result' => 'failed', 'invoice' => null, 'error' => [
-                    'code' => 'external_reference_already_used',
-                    'message' => 'An invoice with this external reference was already issued.',
-                ]];
-            }
-
-            if ($this->recipientIsNotIdentified($invoice)) {
-                return [...$item, 'result' => 'failed', 'invoice' => null, 'error' => [
-                    'code' => 'recipient_not_identified',
-                    'message' => self::RecipientNotIdentified,
-                ]];
+            if ($refusal !== null) {
+                return [...$item, 'result' => 'failed', 'invoice' => null, 'error' => Arr::except($refusal, 'status')];
             }
 
             return [...$item, 'result' => 'issued', 'invoice' => $this->store($invoice), 'error' => null];
         });
 
-        $failed = $items->where('result', 'failed')->count();
-        $now = Date::now()->toIso8601String();
+        $failed = $items->whereStrict('result', 'failed')->count();
+        $now = $this->now()->toIso8601String();
 
         $batch = [
             'uuid' => (string) Str::uuid(),
-            'environment' => 'test',
+            'environment' => $this->environment()?->value,
             'status' => 'queued',
             'total' => $items->count(),
             'processed' => 0,
@@ -428,29 +565,53 @@ class VerifactuFake extends Client implements Fake
         return Http::response(['data' => $this->batches[$uuid]['batch']]);
     }
 
-    /**
-     * @param  array<mixed>  $query
-     */
-    protected function batchItems(string $uuid, array $query): PromiseInterface
+    protected function batchItems(string $uuid, Request $request): PromiseInterface
     {
         if (! isset($this->batches[$uuid])) {
             return $this->notFound();
         }
 
-        $page = 1;
+        $page = $request->uri()->query()->get('page');
+        $number = 1;
 
-        if (is_numeric($query['page'] ?? null)) {
-            $page = (int) $query['page'];
+        if (is_numeric($page) && (int) $page >= 1) {
+            $number = (int) $page;
         }
 
-        return $this->page($this->batches[$uuid]['items'], $page);
+        return Http::response($this->page($request, $this->batches[$uuid]['items'], $number, 100, 'page'));
+    }
+
+    /**
+     * @param  array<mixed>  $body
+     */
+    protected function answerTaxIdCheck(array $body): PromiseInterface
+    {
+        foreach (['tax_id', 'name'] as $field) {
+            if (blank($body[$field] ?? null)) {
+                return $this->refuse($this->invalid('field_required', $field, "The {$field} field is required."));
+            }
+        }
+
+        if (is_string($body['tax_id']) && SpanishTaxId::isInvalid($body['tax_id'])) {
+            return $this->refuse($this->invalid('invalid_tax_id', 'tax_id', InvoiceRules::InvalidTaxId));
+        }
+
+        if (InvoiceRules::isInvalidName($body['name'])) {
+            return $this->refuse($this->invalid('invalid_recipient_name', 'name', 'The name is not text or is longer than 120 characters.'));
+        }
+
+        return Http::response(['data' => [
+            'tax_id' => $body['tax_id'],
+            'result' => $this->taxIdCheck->result->value,
+            'official_name' => $this->taxIdCheck->officialName,
+        ]]);
     }
 
     /**
      * Numbers the invoice and keeps it, as the service issues it.
      *
      * @param  array<mixed>  $body
-     * @return array<string, mixed>
+     * @return Invoice
      */
     protected function store(array $body): array
     {
@@ -458,95 +619,304 @@ class VerifactuFake extends Client implements Fake
 
         $uuid = (string) Str::uuid();
         $number = (string) $this->lastNumber;
-        $issueDate = Date::now('Europe/Madrid');
-        $total = $body['total_amount'] ?? '0.00';
+        $invoiceNumber = self::Series.$number;
+        $issueDate = $this->now();
+
+        /** @var array{total_amount: numeric-string, external_reference?: string|null} $body InvoiceRules let it through */
+        $total = $body['total_amount'];
 
         $this->invoices[$uuid] = [
             'uuid' => $uuid,
-            'environment' => 'test',
+            'environment' => $this->environment()?->value,
             'status' => InvoiceStatus::Pending->value,
-            'series' => 'FACT',
+            'series' => self::Series,
             'number' => $number,
-            'invoice_number' => "FACT{$number}",
+            'invoice_number' => $invoiceNumber,
             'issue_date' => $issueDate->toDateString(),
             'total_amount' => $total,
             'external_reference' => $body['external_reference'] ?? null,
-            'verification_url' => 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?'.http_build_query([
+            'verification_url' => 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?'.Arr::query([
                 'nif' => 'B00000000',
-                'numserie' => "FACT{$number}",
+                'numserie' => $invoiceNumber,
                 'fecha' => $issueDate->format('d-m-Y'),
                 'importe' => $total,
             ]),
             'qr_code' => self::QrCode,
-            'hash' => Str::upper(hash('sha256', $uuid)),
+            'hash' => null,
             'aeat' => ['verification_code' => null, 'error_code' => null, 'error_message' => null, 'registered_at' => null],
         ];
 
         $this->requests[$uuid] = $body;
 
+        $this->sendRecord($uuid, 'registration');
+
         return $this->invoices[$uuid];
     }
 
     /**
-     * The service's refusal to fix or cancel the invoice, if it has one.
+     * Generates the invoice's next AEAT record, which awaits AEAT's answer:
+     * the invoice is pending, with the record's hash and no answer yet.
      */
-    protected function refuseChange(string $uuid): ?PromiseInterface
+    protected function sendRecord(string $uuid, string $type): void
     {
-        if (! isset($this->invoices[$uuid])) {
-            return $this->notFound();
+        $recordUuid = (string) Str::uuid();
+        $hash = Str::upper(hash('sha256', $recordUuid));
+
+        $this->records[$uuid] = [...$this->records[$uuid] ?? [], [
+            'uuid' => $recordUuid,
+            'type' => $type,
+            'status' => 'pending',
+            'hash' => $hash,
+            'generated_at' => $this->now()->toIso8601String(),
+        ]];
+
+        $this->invoices[$uuid] = [
+            ...$this->invoices[$uuid],
+            'status' => InvoiceStatus::Pending->value,
+            'hash' => $hash,
+            'aeat' => ['verification_code' => null, 'error_code' => null, 'error_message' => null, 'registered_at' => null],
+        ];
+    }
+
+    /**
+     * The service's refusal to issue the body, if it has one.
+     *
+     * @param  array<mixed>  $body
+     * @return Refusal|null
+     */
+    protected function issueRefusal(array $body): ?array
+    {
+        return $this->invalidity($body)
+            ?? $this->referenceRefusal($body)
+            ?? $this->recipientRefusal($body);
+    }
+
+    /**
+     * The service's validation error for an invoice's body, if it has one.
+     *
+     * @param  array<mixed>  $body
+     * @return Refusal|null
+     */
+    protected function invalidity(array $body): ?array
+    {
+        $error = InvoiceRules::firstError($body);
+
+        if ($error === null) {
+            return null;
         }
 
+        return $this->invalid(...$error);
+    }
+
+    /**
+     * The service's refusal to correct or cancel the invoice, if it has one.
+     *
+     * @return Refusal|null
+     */
+    protected function changeRefusal(string $uuid): ?array
+    {
         $status = $this->invoices[$uuid]['status'];
 
         if ($status === InvoiceStatus::Pending->value) {
-            return $this->error(409, 'invoice_awaiting_aeat', 'AEAT has not answered for the invoice\'s last record yet.');
+            return $this->refusal(409, 'invoice_awaiting_aeat', 'AEAT has not answered for the invoice\'s last record yet.');
         }
 
         if ($status === InvoiceStatus::Cancelled->value) {
-            return $this->error(409, 'invoice_cancelled', 'The invoice is cancelled.');
+            return $this->refusal(409, 'invoice_cancelled', 'The invoice is cancelled.');
         }
 
         return null;
     }
 
     /**
-     * Sends the invoice's new record to AEAT, which is to answer.
-     */
-    protected function awaitAeat(string $uuid): PromiseInterface
-    {
-        $this->invoices[$uuid]['status'] = InvoiceStatus::Pending->value;
-
-        return Http::response(['data' => $this->invoices[$uuid]], 201);
-    }
-
-    /**
-     * Whether the service refuses the body's Spanish customer: AEAT doesn't
-     * know the tax ID under that name, unless the app skips the check.
+     * The refusal of a correction that changes more than the description
+     * and each line's codes not printed on the invoice.
      *
      * @param  array<mixed>  $body
+     * @return Refusal|null
      */
-    protected function recipientIsNotIdentified(array $body): bool
+    protected function fiscalChange(string $uuid, array $body): ?array
     {
-        return $this->taxIdCheck->result === TaxIdCheckResult::NotIdentified
-            && is_string(Arr::get($body, 'recipient.tax_id'))
-            && ($body['validate_recipient'] ?? true) !== false;
+        $issued = $this->fiscalData($this->requests[$uuid]);
+        $sent = $this->fiscalData($body);
+
+        $changed = Collection::make([...$issued, ...$sent])->keys()
+            ->map(fn (int|string $field): string => (string) $field)
+            ->reject(fn (string $field): bool => ($issued[$field] ?? null) === ($sent[$field] ?? null));
+
+        if ($changed->isEmpty()) {
+            return null;
+        }
+
+        $message = 'A correction may change only the description and the codes not printed on the invoice. To change amounts, rates or the customer, issue a corrective invoice (R1–R4).';
+
+        return $this->refusal(422, 'correction_changes_fiscal_data', $message, $changed->mapWithKeys(fn (string $field): array => [$field => [$message]])->all());
+    }
+
+    /**
+     * The body without what a correction may change.
+     *
+     * @param  array<mixed>  $body
+     * @return array<mixed>
+     */
+    protected function fiscalData(array $body): array
+    {
+        $body = Arr::except($body, 'description');
+
+        if (array_key_exists('lines', $body)) {
+            $body['lines'] = Collection::make(Arr::wrap($body['lines']))
+                ->map(fn (mixed $line): array => Arr::except(Arr::wrap($line), self::CorrectableLineFields))
+                ->all();
+        }
+
+        return $this->withSortedKeys($body);
+    }
+
+    /**
+     * The order of fields never matters; the order of lines and of the
+     * invoices a correction refers to does, so lists keep theirs.
+     *
+     * @param  array<mixed>  $value
+     * @return array<mixed>
+     */
+    protected function withSortedKeys(array $value): array
+    {
+        $value = Arr::map($value, function (mixed $item): mixed {
+            if (is_array($item)) {
+                return $this->withSortedKeys($item);
+            }
+
+            return $item;
+        });
+
+        if (Arr::isList($value)) {
+            return $value;
+        }
+
+        return Collection::make($value)->sortKeys()->all();
+    }
+
+    /**
+     * The refusal of a Spanish customer AEAT doesn't know under that name,
+     * unless the app skips the check.
+     *
+     * @param  array<mixed>  $body
+     * @return Refusal|null
+     */
+    protected function recipientRefusal(array $body): ?array
+    {
+        if ($this->taxIdCheck->result !== TaxIdCheckResult::NotIdentified
+            || ! is_string(Arr::get($body, 'recipient.tax_id'))
+            || ($body['validate_recipient'] ?? true) === false) {
+            return null;
+        }
+
+        return $this->refusal(422, 'recipient_not_identified', self::RecipientNotIdentified, ['recipient.tax_id' => [self::RecipientNotIdentified]]);
     }
 
     /**
      * @param  array<mixed>  $body
+     * @return Refusal|null
      */
-    protected function referenceIsTaken(array $body): bool
+    protected function referenceRefusal(array $body): ?array
     {
         $reference = $body['external_reference'] ?? null;
 
-        return is_string($reference)
-            && Collection::make($this->invoices)->contains('external_reference', $reference);
+        if (! is_string($reference) || ! Collection::make($this->invoices)->pluck('external_reference')->containsStrict($reference)) {
+            return null;
+        }
+
+        return $this->refusal(409, 'external_reference_already_used', 'An invoice with this external reference was already issued.');
+    }
+
+    /**
+     * The invoice as the list query reads it, with its place in the order
+     * the invoices were created.
+     *
+     * @return Row
+     */
+    protected function row(int $position, string $uuid): array
+    {
+        return [
+            'invoice' => $this->invoices[$uuid],
+            'body' => $this->lastBody($uuid),
+            'total' => new Number($this->invoices[$uuid]['total_amount']),
+            'position' => $position,
+        ];
+    }
+
+    /**
+     * The relations a list can include, built from the invoice's last record.
+     *
+     * @return array{tax_lines: array<int, array<mixed>>, references: list<array{kind: string, invoice_number: string, issue_date: string}>, billing_records: list<BillingRecord>}
+     */
+    protected function relations(string $uuid): array
+    {
+        $body = $this->lastBody($uuid);
+
+        /** @var list<array<string, mixed>> $lines */
+        $lines = $body['lines'] ?? [['tax_base' => $this->invoices[$uuid]['total_amount'], 'exemption_reason' => 'E1']];
+
+        /** @var list<array{number?: string, invoice_number?: string, issue_date: string}> $corrected */
+        $corrected = Arr::get($body, 'correction.corrected_invoices', []);
+
+        /** @var list<array{number?: string, invoice_number?: string, issue_date: string}> $replaced */
+        $replaced = $body['replaced_invoices'] ?? [];
+
+        return [
+            'tax_lines' => Collection::make($lines)->map($this->taxLine(...))->all(),
+            'references' => [
+                ...Collection::make($corrected)->map(fn (array $invoice): array => $this->reference('corrected', $invoice)),
+                ...Collection::make($replaced)->map(fn (array $invoice): array => $this->reference('replaced', $invoice)),
+            ],
+            'billing_records' => $this->records[$uuid],
+        ];
+    }
+
+    /**
+     * A line as the service answers it: a line without a qualification or
+     * an exemption reason is exempt with E1.
+     *
+     * @param  array<string, mixed>  $line
+     * @return array<mixed>
+     */
+    protected function taxLine(array $line): array
+    {
+        $line = [...self::TaxLine, ...Arr::only($line, array_keys(self::TaxLine))];
+
+        if ($line['operation_qualification'] === null && $line['exemption_reason'] === null) {
+            $line['exemption_reason'] = 'E1';
+        }
+
+        return $line;
+    }
+
+    /**
+     * @param  array{number?: string, invoice_number?: string, issue_date: string}  $invoice
+     * @return array{kind: string, invoice_number: string, issue_date: string}
+     */
+    protected function reference(string $kind, array $invoice): array
+    {
+        $invoiceNumber = $invoice['invoice_number'] ?? self::Series.($invoice['number'] ?? '');
+
+        return ['kind' => $kind, 'invoice_number' => $invoiceNumber, 'issue_date' => $invoice['issue_date']];
+    }
+
+    /**
+     * The body of the invoice's last record: its last correction, or the
+     * body it was issued from.
+     *
+     * @return array<mixed>
+     */
+    protected function lastBody(string $uuid): array
+    {
+        return $this->corrections[$uuid] ?? $this->requests[$uuid];
     }
 
     protected function uuidOf(Model&VerifactuInvoice $invoice): ?string
     {
         $uuid = Collection::make($this->invoices)
-            ->firstWhere('external_reference', $invoice->verifactuReference())['uuid'] ?? null;
+            ->firstWhere('external_reference', '===', $invoice->verifactuReference())['uuid'] ?? null;
 
         if (! is_string($uuid)) {
             return null;
@@ -556,46 +926,72 @@ class VerifactuFake extends Client implements Fake
     }
 
     /**
-     * One page of a list, 100 items per page, as the service paginates.
+     * One page of a list, built by Laravel's own paginator and resource
+     * collection, as the service builds its lists.
      *
      * @param  array<int, array<mixed>>  $items
+     * @param  string  $pageKey  The query key of the page number, in dot notation, such as "page.number".
+     * @return array<string, mixed>
      */
-    protected function page(array $items, int $page): PromiseInterface
+    protected function page(Request $request, array $items, int $number, int $size, string $pageKey): array
     {
-        $perPage = 100;
-        $lastPage = max(1, (int) ceil(count($items) / $perPage));
-        $slice = Collection::make($items)->forPage($page, $perPage)->values();
-        $from = null;
-        $to = null;
+        $query = $request->uri()->query()->all();
 
-        if ($slice->isNotEmpty()) {
-            $from = ($page - 1) * $perPage + 1;
-            $to = $from + $slice->count() - 1;
-        }
+        Arr::forget($query, $pageKey);
 
-        return Http::response([
-            'data' => $slice->all(),
-            'links' => ['first' => null, 'last' => null, 'prev' => null, 'next' => null],
-            'meta' => [
-                'current_page' => $page,
-                'from' => $from,
-                'last_page' => $lastPage,
-                'links' => [],
-                'path' => null,
-                'per_page' => $perPage,
-                'to' => $to,
-                'total' => count($items),
-            ],
-        ]);
+        $paginator = new LengthAwarePaginator(
+            Collection::make($items)->forPage($number, $size)->values(),
+            count($items),
+            $size,
+            $number,
+            // "page.number" is the query's page[number].
+            ['path' => Str::before($request->url(), '?'), 'pageName' => Str::replaceMatches('/\.([^.]+)/', '[$1]', $pageKey)],
+        );
+
+        /** @var array<string, mixed> */
+        return JsonResource::collection($paginator->appends($query))->response()->getData(true);
     }
 
-    protected function error(int $status, string $code, string $message): PromiseInterface
+    /**
+     * A validation error of one field.
+     *
+     * @return Refusal
+     */
+    protected function invalid(string $code, string $field, string $message): array
     {
-        return Http::response(['message' => $message, 'code' => $code], $status);
+        return $this->refusal(422, $code, $message, [$field => [$message]]);
+    }
+
+    /**
+     * @param  array<string, list<string>>  $errors
+     * @return Refusal
+     */
+    protected function refusal(int $status, string $code, string $message, array $errors = []): array
+    {
+        $refusal = ['status' => $status, 'code' => $code, 'message' => $message];
+
+        if ($errors !== []) {
+            $refusal['errors'] = $errors;
+        }
+
+        return $refusal;
+    }
+
+    /**
+     * @param  Refusal  $refusal
+     */
+    protected function refuse(array $refusal): PromiseInterface
+    {
+        return Http::response(Arr::except($refusal, 'status'), $refusal['status']);
     }
 
     protected function notFound(): PromiseInterface
     {
         return Http::response(['message' => 'Not found.'], 404);
+    }
+
+    protected function now(): Carbon
+    {
+        return Date::now('Europe/Madrid');
     }
 }

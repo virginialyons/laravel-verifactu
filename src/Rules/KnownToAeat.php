@@ -14,8 +14,8 @@ use Vlec\Verifactu\TaxIdCheckResult;
 
 /**
  * Asks AEAT whether it knows the Spanish tax ID under the name in another
- * field. Passes when AEAT can't answer: the invoice is checked again when
- * it is issued.
+ * field. Refuses a tax ID or a name the service finds malformed. Passes
+ * when AEAT can't answer: the invoice is checked again when it is issued.
  */
 class KnownToAeat implements DataAwareRule, ValidationRule
 {
@@ -46,7 +46,24 @@ class KnownToAeat implements DataAwareRule, ValidationRule
 
         try {
             $check = Verifactu::withoutRetries()->checkTaxId($value, $name);
-        } catch (VerifactuException) {
+        } catch (VerifactuException $exception) {
+            if ($exception->errorCode === 'invalid_tax_id') {
+                $fail('This is not a valid Spanish tax ID.')->translate();
+
+                return;
+            }
+
+            if ($exception->errorCode === 'invalid_recipient_name') {
+                $fail($this->nameField, 'AEAT takes a name of at most 120 characters.')->translate();
+
+                return;
+            }
+
+            // Not an outage, such as a refused token: the form passes, and someone should know.
+            if ($exception->isNotRetryable()) {
+                report($exception);
+            }
+
             return;
         }
 

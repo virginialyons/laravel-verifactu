@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 enum Environment: string
 {
     case Test = 'test';
-    case Live = 'live';
+    case Live = 'production';
 
     public static function fromToken(string $token): ?self
     {
