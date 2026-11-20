@@ -6,6 +6,10 @@ namespace Vlec\Verifactu;
 
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Support\ServiceProvider;
+use Vlec\Verifactu\Console\Commands\CorrectCommand;
+use Vlec\Verifactu\Console\Commands\InstallCommand;
+use Vlec\Verifactu\Console\Commands\RefreshPendingCommand;
+use Vlec\Verifactu\Console\Commands\StatusCommand;
 
 class VerifactuServiceProvider extends ServiceProvider
 {
@@ -31,6 +35,13 @@ class VerifactuServiceProvider extends ServiceProvider
         $this->publishesMigrations([
             __DIR__.'/../database/migrations' => database_path('migrations'),
         ], 'verifactu-migrations');
+
+        $this->commands([
+            InstallCommand::class,
+            StatusCommand::class,
+            RefreshPendingCommand::class,
+            CorrectCommand::class,
+        ]);
 
         AboutCommand::add('Verifactu', fn (Client $client): array => [
             'URL' => config('verifactu.url') ?? 'Not set',
