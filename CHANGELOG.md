@@ -1,8 +1,3 @@
 # Release Notes
 
-## [Unreleased](https://github.com/vlec/laravel-verifactu/compare/v0.1.0...1.x)
-
-
-## [v0.1.0](https://github.com/vlec/laravel-verifactu/compare/...v0.1.0) - 202x-xx-xx
-
-Initial pre-release.
+All notable changes to `vlec/laravel-verifactu` are recorded here. Each release's notes are added when it is published on GitHub.
