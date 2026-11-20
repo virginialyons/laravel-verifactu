@@ -17,6 +17,7 @@ return new class extends Migration
             $table->integer('exempt_cents')->default(0);
             $table->integer('taxable_cents')->default(0);
             $table->boolean('is_simplified')->default(false);
+            $table->foreignId('corrects_id')->nullable();
 
             // The service's answer, in columns named the app's own way.
             $table->uuid('verifactu_uuid')->nullable()->unique();

@@ -6,6 +6,7 @@ namespace Workbench\App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\InvoiceData;
 use Vlec\Verifactu\IssuesVerifactuInvoices;
@@ -22,6 +23,8 @@ use Workbench\Database\Factories\InvoiceFactory;
  * @property int $exempt_cents
  * @property int $taxable_cents
  * @property bool $is_simplified
+ * @property ?int $corrects_id
+ * @property-read ?Invoice $corrects
  */
 class Invoice extends Model implements VerifactuInvoice
 {
@@ -45,10 +48,27 @@ class Invoice extends Model implements VerifactuInvoice
         $data = InvoiceData::make("Order {$this->id}")->lines($lines);
 
         if ($this->is_simplified) {
-            return $data->simplified();
+            $data = $data->simplified();
+        } else {
+            $data = $data->to(Recipient::spanish((string) $this->customer_tax_id, (string) $this->customer_name));
         }
 
-        return $data->to(Recipient::spanish((string) $this->customer_tax_id, (string) $this->customer_name));
+        // Last, so it picks R1 or R5 from the original.
+        if ($this->corrects !== null) {
+            $data = $data->correcting($this->corrects);
+        }
+
+        return $data;
+    }
+
+    /**
+     * The invoice this one corrects for the difference.
+     *
+     * @return BelongsTo<self, $this>
+     */
+    public function corrects(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'corrects_id');
     }
 
     protected function casts(): array

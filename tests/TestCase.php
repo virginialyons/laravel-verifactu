@@ -16,6 +16,14 @@ abstract class TestCase extends Orchestra
 {
     use WithWorkbench;
 
+    /**
+     * The workbench's .env, which composer build and serve copy into
+     * Testbench's skeleton, never reaches the tests.
+     *
+     * @var bool
+     */
+    protected $loadEnvironmentVariables = false;
+
     protected function setUp(): void
     {
         parent::setUp();
