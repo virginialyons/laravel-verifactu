@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Vlec\Verifactu\Client;
 use Vlec\Verifactu\Events\InvoiceNotIssued;
 use Vlec\Verifactu\Exceptions\VerifactuException;
@@ -47,7 +48,7 @@ it('sends the invoices as one batch once committed, and keeps the batch', functi
 
     Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
         && collect($request['invoices'])->pluck('external_reference')->all() === ["invoice:{$invoices[0]->id}", "invoice:{$invoices[1]->id}"]
-        && str_starts_with($request->header('Idempotency-Key')[0], 'batch:'));
+        && Str::startsWith($request->header('Idempotency-Key')[0], 'batch:'));
     expect(InvoiceBatch::sole())
         ->uuid->toBe('5f0c6a2e-8a5b-4c1e-9d7a-2b8e4f6a1c3d')
         ->status->toBe(InvoiceBatchStatus::Queued);
@@ -112,7 +113,7 @@ it('sends an invoice given twice once', function (): void {
     $invoice = Invoice::factory()->create();
 
     // A copy loaded on its own, with a relation, is still the same invoice.
-    $copy = Invoice::query()->find($invoice->id)->setRelation('notes', collect());
+    $copy = Invoice::query()->find($invoice->id)->setRelation('notes', Collection::make());
 
     Verifactu::sendBatch([$invoice, $copy, Invoice::factory()->create()]);
 

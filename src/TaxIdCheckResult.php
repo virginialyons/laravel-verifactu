@@ -22,6 +22,9 @@ enum TaxIdCheckResult: string
      */
     public function isRefused(): bool
     {
-        return in_array($this, [self::NotIdentified, self::Deregistered, self::Revoked], true);
+        return match ($this) {
+            self::NotIdentified, self::Deregistered, self::Revoked => true,
+            default => false,
+        };
     }
 }

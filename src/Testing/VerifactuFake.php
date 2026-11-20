@@ -188,7 +188,8 @@ class VerifactuFake extends Client implements Fake
         }
 
         $records = $this->records[$uuid];
-        $record = $records[array_key_last($records)];
+        $last = array_key_last($records);
+        $record = $records[$last];
 
         if ($record['status'] !== 'pending') {
             throw new LogicException("Nothing of the invoice [{$reference}] awaits AEAT's answer: correct or cancel it first.");
@@ -227,7 +228,7 @@ class VerifactuFake extends Client implements Fake
         }
 
         $this->invoices[$uuid] = [...$this->invoices[$uuid], 'status' => $status->value, 'aeat' => $aeat];
-        $this->records[$uuid][array_key_last($records)] = [...$record, 'status' => $recordStatus];
+        $this->records[$uuid][$last] = [...$record, 'status' => $recordStatus];
 
         RefreshInvoice::dispatch($invoice);
 
@@ -302,7 +303,7 @@ class VerifactuFake extends Client implements Fake
         $uuid = $this->uuidOf($invoice);
 
         PHPUnit::assertTrue(
-            $uuid !== null && in_array($uuid, $this->cancellations, true),
+            $uuid !== null && Collection::make($this->cancellations)->containsStrict($uuid),
             "The invoice [{$invoice->verifactuReference()}] was not cancelled on Verifactu.",
         );
     }
@@ -763,7 +764,7 @@ class VerifactuFake extends Client implements Fake
     {
         $body = Arr::except($body, 'description');
 
-        if (array_key_exists('lines', $body)) {
+        if (Arr::exists($body, 'lines')) {
             $body['lines'] = Collection::make(Arr::wrap($body['lines']))
                 ->map(fn (mixed $line): array => Arr::except(Arr::wrap($line), self::CorrectableLineFields))
                 ->all();
@@ -882,7 +883,7 @@ class VerifactuFake extends Client implements Fake
      */
     protected function taxLine(array $line): array
     {
-        $line = [...self::TaxLine, ...Arr::only($line, array_keys(self::TaxLine))];
+        $line = [...self::TaxLine, ...Arr::only($line, Collection::make(self::TaxLine)->keys()->all())];
 
         if ($line['operation_qualification'] === null && $line['exemption_reason'] === null) {
             $line['exemption_reason'] = 'E1';
@@ -941,7 +942,7 @@ class VerifactuFake extends Client implements Fake
 
         $paginator = new LengthAwarePaginator(
             Collection::make($items)->forPage($number, $size)->values(),
-            count($items),
+            Collection::make($items)->count(),
             $size,
             $number,
             // "page.number" is the query's page[number].

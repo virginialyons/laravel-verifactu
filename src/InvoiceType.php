@@ -15,14 +15,6 @@ enum InvoiceType: string
     case Corrective = 'R1';
     case CorrectiveOfSimplified = 'R5';
 
-    /**
-     * Simplified invoices and their corrective invoices name no recipient.
-     */
-    public function takesNoRecipient(): bool
-    {
-        return $this === self::Simplified || $this === self::CorrectiveOfSimplified;
-    }
-
     public function isCorrective(): bool
     {
         return $this === self::Corrective || $this === self::CorrectiveOfSimplified;

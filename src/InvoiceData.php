@@ -9,19 +9,16 @@ use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
-use InvalidArgumentException;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 
 /**
  * What an invoice says, built from the app's sale. It turns into the
- * body of POST /invoices and nothing else.
+ * body of POST /invoices and nothing else: the service judges it.
  *
  * @implements Arrayable<string, mixed>
  */
 class InvoiceData implements Arrayable
 {
-    public const int MaxTaxLines = 12;
-
     protected InvoiceType $type = InvoiceType::Full;
 
     protected ?Recipient $recipient = null;
@@ -29,7 +26,7 @@ class InvoiceData implements Arrayable
     /** @var array<int, TaxLine> */
     protected array $lines = [];
 
-    /** @var array<int, array{number: string, issue_date: string}> */
+    /** @var array<int, array<string, string>> */
     protected array $references = [];
 
     final public function __construct(protected string $description) {}
@@ -111,16 +108,11 @@ class InvoiceData implements Arrayable
      */
     public function taxLines(): array
     {
-        $taxLines = Collection::make($this->lines)
+        return Collection::make($this->lines)
             ->groupBy(fn (TaxLine $line): string => $line->groupKey())
             ->map(fn (Collection $lines): TaxLine => $lines->firstOrFail()->withBaseCents($lines->sum(fn (TaxLine $line): int => $line->baseCents)))
-            ->values();
-
-        if ($taxLines->isEmpty() || $taxLines->count() > self::MaxTaxLines) {
-            throw new InvalidArgumentException('An invoice has between 1 and '.self::MaxTaxLines." tax lines; this one has {$taxLines->count()}.");
-        }
-
-        return $taxLines->all();
+            ->values()
+            ->all();
     }
 
     public function totalCents(): int
@@ -133,10 +125,6 @@ class InvoiceData implements Arrayable
      */
     public function toArray(): array
     {
-        if ($this->type->takesNoRecipient() && $this->recipient !== null) {
-            throw new InvalidArgumentException("An {$this->type->value} invoice has no recipient: simplified invoices (F2) and their corrective invoices (R5) never name one.");
-        }
-
         $body = ['description' => $this->description];
 
         if ($this->type !== InvoiceType::Full) {
@@ -163,23 +151,31 @@ class InvoiceData implements Arrayable
     }
 
     /**
-     * An issued invoice as the API refers to it: its bare number and issue date.
+     * An issued invoice as the API refers to it: its bare number and issue
+     * date. An invoice not issued yet has neither, and the service refuses
+     * the reference.
      *
-     * @return array{number: string, issue_date: string}
+     * @return array<string, string>
      */
     protected function reference(Model&VerifactuInvoice $invoice): array
     {
         $number = $invoice->getAttribute(config()->string('verifactu.columns.number'));
         $issueDate = $invoice->getAttribute(config()->string('verifactu.columns.issue_date'));
 
+        $reference = [];
+
+        if (is_string($number)) {
+            $reference['number'] = $number;
+        }
+
+        if (is_string($issueDate)) {
+            $issueDate = Date::parse($issueDate);
+        }
+
         if ($issueDate instanceof DateTimeInterface) {
-            $issueDate = $issueDate->format('Y-m-d');
+            $reference['issue_date'] = $issueDate->format('Y-m-d');
         }
 
-        if (! is_string($number) || ! is_string($issueDate)) {
-            throw new InvalidArgumentException('An invoice must be issued on Verifactu before it is corrected or replaced.');
-        }
-
-        return ['number' => $number, 'issue_date' => Date::parse($issueDate)->toDateString()];
+        return $reference;
     }
 }

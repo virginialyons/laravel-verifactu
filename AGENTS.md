@@ -37,6 +37,7 @@ This repository is a Laravel package. Keep the package focused, idiomatic, and e
 - Call sites read like Laravel's: short, plain-English model methods (`$invoice->sendToVerifactu()`), the machinery hidden in the trait, the jobs and the client.
 - Use what Laravel and the installed packages already provide; check the **installed** version's docs and source in `vendor/` before writing anything by hand. Never write framework class or method names from memory.
 - Write `if` statements, not ternaries. Constants are PascalCase. No `env()` outside `config/`.
+- **The service is the source of truth.** The package plugs the app into it and nothing more: it sends what the app describes and passes on the service's answer. It never validates, refuses or decides differently from the service (stricter or looser), and never copies one of the service's rules. Its own bookkeeping stays its own (an invoice stored as issued isn't sent again).
 - The token decides the environment (`vf_test_` → Test, `vf_prod_` → Live). Never log, print or show the token or the webhook secret. Tests never send anything to a real service: `Http::preventStrayRequests()`.
 - Work on `main`; no branches or PRs. Commit and push only when the owner asks. No AI or Claude mentions in commits.
 - `CLAUDE.md` is a link to this file: edit `AGENTS.md`, never write to `CLAUDE.md`.

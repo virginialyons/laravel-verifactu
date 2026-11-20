@@ -100,7 +100,7 @@ it('refuses with a final 403, queueing nothing, a delivery with :dataset', funct
 
     Queue::assertNothingPushed();
 })->with([
-    'a tampered body' => [fn (string $body): string => webhookSignature(str_replace('pending', 'accepted', $body))],
+    'a tampered body' => [fn (string $body): string => webhookSignature(Str::replace('pending', 'accepted', $body))],
     'a body decoded and encoded again' => [fn (string $body): string => webhookSignature((string) json_encode(json_decode($body)))],
     'the wrong secret' => [fn (string $body): string => webhookSignature($body, secret: 'whsec_another-secret')],
     'a signature 301 seconds old' => [fn (string $body): string => webhookSignature($body, now()->subSeconds(301)->getTimestamp())],

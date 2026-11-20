@@ -7,7 +7,6 @@ namespace Vlec\Verifactu;
 use BcMath\Number;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Arr;
-use InvalidArgumentException;
 use RoundingMode;
 
 /**
@@ -22,20 +21,13 @@ class TaxLine implements Arrayable
     ) {}
 
     /**
-     * A line subject to VAT at the given rate in percent, such as 21 or '5.5'.
+     * A line subject to VAT at the given rate in percent, such as 21.
      *
      * @param  int|numeric-string  $rate
      */
     public static function vat(int $baseCents, int|string $rate): self
     {
-        $rate = new Number($rate);
-
-        // The API takes at most two decimals, and lines are grouped by the rate to two decimals.
-        if ($rate->scale > 2) {
-            throw new InvalidArgumentException("A VAT rate has at most two decimals; {$rate} has more.");
-        }
-
-        return new self($baseCents, rate: $rate);
+        return new self($baseCents, rate: new Number($rate));
     }
 
     /**
@@ -44,12 +36,6 @@ class TaxLine implements Arrayable
     public static function exempt(int $baseCents, ?ExemptionReason $reason = null): self
     {
         $reason ??= ExemptionReason::from(config()->string('verifactu.exemption_reason'));
-
-        // AEAT refuses E3 under the default regime key 01 ("Validaciones y errores" v1.2.2, §15.5),
-        // and neither AEAT nor the service says which key it takes: refused before it gets a number.
-        if ($reason === ExemptionReason::ExportLikeOperations) {
-            throw new InvalidArgumentException('Exemption reason E3 (article 22) is not supported yet: AEAT refuses it under the general regime key 01, and the key it takes is not confirmed.');
-        }
 
         return new self($baseCents, exemptionReason: $reason);
     }
@@ -84,7 +70,10 @@ class TaxLine implements Arrayable
             return "exempt:{$this->exemptionReason->value}";
         }
 
-        return "vat:{$this->rate?->add(0, 2)->value}";
+        // 21 and 21.00 are one rate; 21.001 stays apart, for the service to judge.
+        $scale = max(2, $this->rate->scale ?? 0);
+
+        return "vat:{$this->rate?->add(0, $scale)->value}";
     }
 
     public function withBaseCents(int $baseCents): self

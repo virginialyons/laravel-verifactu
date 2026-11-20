@@ -15,7 +15,7 @@ enum ExemptionReason: string
     /** Article 21: exports. */
     case Exports = 'E2';
 
-    /** Article 22: operations treated as exports. TaxLine::exempt() refuses it until its regime key is confirmed. */
+    /** Article 22: operations treated as exports. */
     case ExportLikeOperations = 'E3';
 
     /** Articles 23 and 24: free zones, customs and tax warehouses. */

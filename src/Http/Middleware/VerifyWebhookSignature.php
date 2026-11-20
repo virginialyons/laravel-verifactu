@@ -47,7 +47,7 @@ class VerifyWebhookSignature
     {
         $parts = Str::of($header)
             ->explode(',')
-            ->mapWithKeys(fn (string $part): array => [trim(Str::before($part, '=')) => trim(Str::after($part, '='))]);
+            ->mapWithKeys(fn (string $part): array => [Str::trim(Str::before($part, '=')) => Str::trim(Str::after($part, '='))]);
 
         $timestamp = $parts->get('t');
         $signature = $parts->get('v1');

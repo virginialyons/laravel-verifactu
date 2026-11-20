@@ -75,11 +75,11 @@ class InstallCommand extends Command
 
         $this->writeConfig($model, $columns);
 
-        $this->writeMigration($invoice->getTable(), array_diff($columns, $existing));
+        $this->writeMigration($invoice->getTable(), Collection::make($columns)->diff($existing)->all());
 
         $this->publishBatchesMigration();
 
-        $this->listOldAeatColumns($invoice, array_diff($existing, $columns));
+        $this->listOldAeatColumns($invoice, Collection::make($existing)->diff($columns)->all());
 
         $this->printNextSteps($model);
 
@@ -98,7 +98,7 @@ class InstallCommand extends Command
         /** @var array<string, string> $columns */
         $columns = config()->array('verifactu.columns');
 
-        return Collection::make(['model', ...array_keys($columns)])
+        return Collection::make($columns)->keys()->prepend('model')
             ->reject(fn (string $key): bool => Str::isMatch($this->configLine($key), $config))
             ->values()
             ->all();

@@ -727,7 +727,37 @@ it('refuses an invoice body as the service does: :dataset', function (array $bod
     'a full invoice without a recipient' => [Arr::except(sale(), 'recipient'), 'recipient_required', 'recipient'],
     'a simplified invoice with a recipient' => [sale(['invoice_type' => 'F2']), 'recipient_not_allowed', 'recipient'],
     'a wrong check letter' => [sale(['recipient' => ['tax_id' => '12345678A', 'name' => 'Ana Pérez']]), 'invalid_tax_id', 'recipient.tax_id'],
+    'an empty list of lines' => [sale(['lines' => [], 'total_amount' => '0.00']), 'invalid_lines', 'lines'],
+    'more than 12 lines' => [sale(['lines' => Collection::times(13, fn (): array => ['tax_base' => '1.00', 'exemption_reason' => 'E1'])->all(), 'total_amount' => '13.00']), 'invalid_lines', 'lines'],
+    'a rate with three decimals' => [sale(['lines' => [['tax_base' => '100.00', 'operation_qualification' => 'S1', 'tax_rate' => '21.001', 'tax_amount' => '21.00']]]), 'invalid_tax_rate', 'lines.0.tax_rate'],
+    'a corrected invoice without its date' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '7']]]]), 'field_required', 'correction.corrected_invoices.0.issue_date'],
+    'a corrected invoice without its number' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0'],
+    'a replaced invoice by both numbers' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['number' => '7', 'invoice_number' => 'FACT7', 'issue_date' => '2026-11-02']]]), 'invalid_referenced_invoice', 'replaced_invoices.0'],
 ]);
+
+it('hands the service\'s refusal of an invoice the app described wrongly to InvoiceNotIssued', function (): void {
+    Event::fake([InvoiceNotIssued::class]);
+    Verifactu::fake();
+    $invoice = Invoice::factory()->create(['exempt_cents' => 0, 'taxable_cents' => 0]);
+
+    rescue(fn () => $invoice->sendToVerifactu(), report: false);
+
+    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice) && $event->errorCode === 'invalid_lines');
+    Verifactu::assertNothingIssued();
+});
+
+it('fails only the batch item the service refuses, and issues the others', function (): void {
+    Event::fake([InvoiceIssued::class, InvoiceNotIssued::class]);
+    Verifactu::fake();
+    [$first, $empty, $last] = [Invoice::factory()->create(), Invoice::factory()->create(['exempt_cents' => 0, 'taxable_cents' => 0]), Invoice::factory()->create()];
+
+    Verifactu::sendBatch([$first, $empty, $last]);
+
+    Verifactu::assertIssued($first);
+    Verifactu::assertIssued($last);
+    Event::assertDispatchedTimes(InvoiceIssued::class, 2);
+    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($empty) && $event->errorCode === 'invalid_lines');
+});
 
 it('fails the batch item the service refuses, with the fields', function (): void {
     Verifactu::fake();

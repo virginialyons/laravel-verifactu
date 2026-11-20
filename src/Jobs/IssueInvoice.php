@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Throwable;
 use Vlec\Verifactu\Client;
@@ -116,7 +117,7 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
         try {
             return $client->createInvoice($this->invoice->toVerifactuRequest(), $this->idempotencyKey);
         } catch (VerifactuException $exception) {
-            if (! in_array($exception->errorCode, self::IssuedBeforeCodes, true)) {
+            if (Collection::make(self::IssuedBeforeCodes)->doesntContainStrict($exception->errorCode)) {
                 throw $exception;
             }
 

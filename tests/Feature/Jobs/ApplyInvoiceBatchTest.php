@@ -43,7 +43,7 @@ function batchItems(Collection $invoices, array $failed = []): array
     return $invoices->values()->map(function (Invoice $invoice, int $index) use ($failed): array {
         $reference = "invoice:{$invoice->id}";
 
-        if (in_array($index, $failed, true)) {
+        if (Collection::make($failed)->containsStrict($index)) {
             return ['index' => $index, 'external_reference' => $reference, 'result' => 'failed', 'invoice' => null, 'error' => ['code' => 'recipient_not_identified', 'message' => 'Unknown customer.']];
         }
 
@@ -66,14 +66,14 @@ function batchItems(Collection $invoices, array $failed = []): array
  */
 function fakeBatch(array $items, array $batch): void
 {
-    $pages = array_chunk($items, 100);
+    $pages = Collection::make($items)->chunk(100)->map(fn (Collection $page): array => $page->values()->all());
 
     Http::fake([
         'verifactu.test/api/v1/invoice-batches/'.BatchUuid => Http::response(['data' => serviceBatch($batch)]),
         'verifactu.test/api/v1/invoice-batches/'.BatchUuid.'/items*' => function (Request $request) use ($pages) {
-            $page = (int) ($request->data()['page'] ?? 1);
+            $page = (int) Arr::get($request->data(), 'page', 1);
 
-            return Http::response(['data' => $pages[$page - 1], 'meta' => ['current_page' => $page, 'last_page' => count($pages)]]);
+            return Http::response(['data' => $pages->get($page - 1), 'meta' => ['current_page' => $page, 'last_page' => $pages->count()]]);
         },
     ]);
 }

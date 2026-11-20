@@ -36,6 +36,15 @@ class InvoiceRules
 
     protected const array LineAmounts = ['tax_base', 'tax_amount', 'equivalence_surcharge_amount'];
 
+    /**
+     * A rate as the service takes it: a percent with at most two decimals.
+     */
+    protected const string Rate = '/^\d{1,3}(\.\d{1,2})?$/';
+
+    protected const array LineRates = ['tax_rate', 'equivalence_surcharge_rate'];
+
+    protected const int MaxLines = 12;
+
     protected const string SimplifiedInvoiceLimit = '3000.00';
 
     /**
@@ -47,7 +56,7 @@ class InvoiceRules
     public static function firstError(array $body): ?array
     {
         foreach (self::AssignedByService as $field => $code) {
-            if (array_key_exists($field, $body)) {
+            if (Arr::exists($body, $field)) {
                 return self::error($code, $field, "The service sets {$field}: remove it.");
             }
         }
@@ -65,13 +74,18 @@ class InvoiceRules
             return self::error('control_character_not_allowed', $withControlCharacter, 'The text contains a control character, such as a tab or a new line, that AEAT refuses.');
         }
 
-        if (! array_key_exists('total_amount', $body)) {
+        if (! Arr::exists($body, 'total_amount')) {
             return self::error('field_required', 'total_amount', 'The total_amount field is required.');
         }
 
-        $lines = Collection::make(Arr::wrap($body['lines'] ?? []))->filter(fn (mixed $line): bool => is_array($line));
+        // Without lines, the service gives the invoice one exempt line for the whole total.
+        if (Arr::exists($body, 'lines') && self::isInvalidLineList($body['lines'])) {
+            return self::error('invalid_lines', 'lines', 'lines must be a list of 1 to 12 tax lines. Merge lines with the same tax type, regime key and rate.');
+        }
 
-        $lineWithoutBase = $lines->search(fn (array $line): bool => ! array_key_exists('tax_base', $line));
+        $lines = Collection::make(Arr::wrap(Arr::get($body, 'lines', [])))->filter(fn (mixed $line): bool => is_array($line));
+
+        $lineWithoutBase = $lines->search(fn (array $line): bool => ! Arr::exists($line, 'tax_base'));
 
         if ($lineWithoutBase !== false) {
             return self::error('field_required', "lines.{$lineWithoutBase}.tax_base", "The lines.{$lineWithoutBase}.tax_base field is required.");
@@ -89,6 +103,17 @@ class InvoiceRules
             return self::error('invalid_amount', $wrongAmount, 'An amount is not a decimal string with a dot and at most two decimals, such as "121.00".');
         }
 
+        $wrongRate = $lines
+            ->flatMap(fn (array $line, int $index): array => Collection::make(Arr::only($line, self::LineRates))
+                ->mapWithKeys(fn (mixed $rate, string $field): array => ["lines.{$index}.{$field}" => $rate])
+                ->all())
+            ->filter(fn (mixed $rate): bool => $rate !== null)
+            ->search(fn (mixed $rate): bool => ! is_string($rate) || ! Str::isMatch(self::Rate, $rate));
+
+        if ($wrongRate !== false) {
+            return self::error('invalid_tax_rate', $wrongRate, 'A rate is not a decimal string with at most two decimals.');
+        }
+
         $reference = $body['external_reference'] ?? null;
 
         if ($reference !== null && (! is_string($reference) || Str::length($reference) > 100)) {
@@ -97,17 +122,17 @@ class InvoiceRules
 
         $type = $body['invoice_type'] ?? 'F1';
 
-        if (! is_string($type) || ! in_array($type, self::InvoiceTypes, true)) {
+        if (! is_string($type) || Collection::make(self::InvoiceTypes)->doesntContainStrict($type)) {
             return self::error('invalid_invoice_type', 'invoice_type', 'The invoice_type is not one of the supported types (F1, F2, F3, R1, R2, R3, R4 or R5).');
         }
 
         $recipient = $body['recipient'] ?? null;
 
-        if ($recipient === null && ! in_array($type, self::TypesWithoutRecipient, true)) {
+        if ($recipient === null && Collection::make(self::TypesWithoutRecipient)->doesntContainStrict($type)) {
             return self::error('recipient_required', 'recipient', "Invoices of type {$type} need a recipient.");
         }
 
-        if ($recipient !== null && in_array($type, self::TypesWithoutRecipient, true)) {
+        if ($recipient !== null && Collection::make(self::TypesWithoutRecipient)->containsStrict($type)) {
             return self::error('recipient_not_allowed', 'recipient', "Invoices of type {$type} have no recipient.");
         }
 
@@ -127,6 +152,24 @@ class InvoiceRules
             return self::error('invalid_tax_id', 'recipient.tax_id', self::InvalidTaxId);
         }
 
+        $references = Collection::make(Arr::wrap(Arr::get($body, 'correction.corrected_invoices', [])))
+            ->mapWithKeys(fn (mixed $invoice, int $index): array => ["correction.corrected_invoices.{$index}" => Arr::wrap($invoice)])
+            ->merge(Collection::make(Arr::wrap(Arr::get($body, 'replaced_invoices', [])))
+                ->mapWithKeys(fn (mixed $invoice, int $index): array => ["replaced_invoices.{$index}" => Arr::wrap($invoice)]));
+
+        $withoutDate = $references->search(fn (array $invoice): bool => ! is_string(Arr::get($invoice, 'issue_date')));
+
+        if ($withoutDate !== false) {
+            return self::error('field_required', "{$withoutDate}.issue_date", "The {$withoutDate}.issue_date field is required.");
+        }
+
+        // An invoice issued here goes by its number, one issued elsewhere by its invoice_number.
+        $wrongReference = $references->search(fn (array $invoice): bool => is_string(Arr::get($invoice, 'number')) === is_string(Arr::get($invoice, 'invoice_number')));
+
+        if ($wrongReference !== false) {
+            return self::error('invalid_referenced_invoice', $wrongReference, 'A corrected or replaced invoice is referenced wrongly: send number or invoice_number, not both, with its issue_date.');
+        }
+
         return null;
     }
 
@@ -136,6 +179,20 @@ class InvoiceRules
     public static function isInvalidName(mixed $name): bool
     {
         return ! is_string($name) || blank($name) || Str::length($name) > 120;
+    }
+
+    /**
+     * The service takes a list of 1 to 12 tax lines.
+     */
+    protected static function isInvalidLineList(mixed $lines): bool
+    {
+        if (! is_array($lines) || ! Arr::isList($lines)) {
+            return true;
+        }
+
+        $count = Collection::make($lines)->count();
+
+        return $count === 0 || $count > self::MaxLines;
     }
 
     /**

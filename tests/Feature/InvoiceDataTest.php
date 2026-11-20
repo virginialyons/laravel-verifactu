@@ -3,7 +3,10 @@
 declare(strict_types=1);
 
 use BcMath\Number;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 use Vlec\Verifactu\ExemptionReason;
 use Vlec\Verifactu\ForeignIdType;
 use Vlec\Verifactu\InvoiceData;
@@ -30,13 +33,13 @@ function serviceExample(string $slug): array
  */
 function withTwoDecimals(array $body): array
 {
-    array_walk_recursive($body, function (mixed &$value, string|int $key): void {
-        if (in_array($key, ['tax_base', 'tax_amount', 'total_amount'], true)) {
-            $value = (new Number($value))->add(0, 2)->value;
+    return Arr::undot(Arr::map(Arr::dot($body), function (mixed $value, string $key): mixed {
+        if (Collection::make(['tax_base', 'tax_amount', 'total_amount'])->doesntContainStrict(Str::afterLast($key, '.'))) {
+            return $value;
         }
-    });
 
-    return $body;
+        return (new Number($value))->add(0, 2)->value;
+    }));
 }
 
 /**
@@ -100,11 +103,10 @@ it('reads the referenced invoice from the configured columns, with a Carbon date
     expect($data->toArray()['correction']['corrected_invoices'])->toBe([['number' => '42', 'issue_date' => '2026-11-18']]);
 });
 
-it('refuses to correct an invoice the service has not issued', function (): void {
-    $original = Invoice::factory()->make();
+it('leaves the number and date out of a reference to an invoice not issued yet, for the service to refuse', function (): void {
+    $data = InvoiceData::make('Refund')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(-1000, rate: 21)])->correcting(Invoice::factory()->make());
 
-    expect(fn () => InvoiceData::make('Refund')->correcting($original))
-        ->toThrow(InvalidArgumentException::class, 'An invoice must be issued on Verifactu before it is corrected or replaced.');
+    expect($data->toArray()['correction']['corrected_invoices'])->toBe([[]]);
 });
 
 it('groups lines with the same rate or exemption reason and adds up their bases', function (): void {
@@ -158,49 +160,46 @@ it('takes the default exemption reason from the config', function (): void {
         ->toBe(['tax_base' => '1.00', 'exemption_reason' => 'E5']);
 });
 
-it('refuses an invoice without lines', function (): void {
-    expect(fn () => InvoiceData::make('Empty order')->to(Recipient::spanish('A15022510', 'Acme'))->toArray())
-        ->toThrow(InvalidArgumentException::class, 'An invoice has between 1 and 12 tax lines; this one has 0.');
+it('sends an invoice without lines as it is, for the service to judge', function (): void {
+    expect(InvoiceData::make('Empty order')->to(Recipient::spanish('A15022510', 'Acme'))->toArray())
+        ->lines->toBe([])
+        ->total_amount->toBe('0.00');
 });
 
 it('takes 12 tax lines', function (): void {
-    $lines = collect(range(1, 12))->map(fn (int $rate): TaxLine => TaxLine::vat(100, rate: $rate));
+    $lines = Collection::range(1, 12)->map(fn (int $rate): TaxLine => TaxLine::vat(100, rate: $rate));
 
     expect(InvoiceData::make('Twelve rates')->to(Recipient::spanish('A15022510', 'Acme'))->lines($lines)->toArray()['lines'])->toHaveCount(12);
 });
 
-it('refuses more than 12 tax lines', function (): void {
-    $lines = collect(range(1, 13))->map(fn (int $rate): TaxLine => TaxLine::vat(100, rate: $rate));
+it('sends more than 12 tax lines as they are, for the service to judge', function (): void {
+    $lines = Collection::range(1, 13)->map(fn (int $rate): TaxLine => TaxLine::vat(100, rate: $rate));
 
-    expect(fn () => InvoiceData::make('Too many rates')->lines($lines)->toArray())
-        ->toThrow(InvalidArgumentException::class, 'An invoice has between 1 and 12 tax lines; this one has 13.');
+    expect(InvoiceData::make('Too many rates')->lines($lines)->toArray()['lines'])->toHaveCount(13);
 });
 
-it('refuses a recipient on a simplified invoice', function (): void {
-    $data = InvoiceData::make('Coffee')->to(Recipient::spanish('A15022510', 'Acme'))->simplified()->lines([TaxLine::vat(100, rate: 10)]);
+it('sends the recipient the app sets on a :dataset, for the service to judge', function (Closure $data, string $type): void {
+    expect($data()->toArray())
+        ->invoice_type->toBe($type)
+        ->recipient->toBe(['tax_id' => 'A15022510', 'name' => 'Acme']);
+})->with([
+    'simplified invoice' => [fn () => InvoiceData::make('Coffee')->to(Recipient::spanish('A15022510', 'Acme'))->simplified()->lines([TaxLine::vat(100, rate: 10)]), 'F2'],
+    'corrective invoice of a simplified one' => [fn () => InvoiceData::make('Refund')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(-1000, rate: 21)])->correcting(issuedInvoice('7', '2026-11-02', simplified: true)), 'R5'],
+]);
 
-    expect(fn () => $data->toArray())->toThrow(InvalidArgumentException::class, 'An F2 invoice has no recipient: simplified invoices (F2) and their corrective invoices (R5) never name one.');
+it('sends a rate as given and groups only the same rate', function (): void {
+    $data = InvoiceData::make('Two rates')->lines([TaxLine::vat(1000, rate: '21.001'), TaxLine::vat(1000, rate: 21)]);
+
+    expect($data->toArray()['lines'])->sequence(
+        fn ($line) => $line->tax_rate->toBe('21.001'),
+        fn ($line) => $line->tax_rate->toBe('21'),
+    );
 });
 
-it('refuses a recipient on the corrective invoice of a simplified one', function (): void {
-    $data = InvoiceData::make('Refund')
-        ->to(Recipient::spanish('A15022510', 'Acme'))
-        ->lines([TaxLine::vat(-1000, rate: 21)])
-        ->correcting(issuedInvoice('7', '2026-11-02', simplified: true));
-
-    expect(fn () => $data->toArray())->toThrow(InvalidArgumentException::class, 'An R5 invoice has no recipient: simplified invoices (F2) and their corrective invoices (R5) never name one.');
-});
-
-it('refuses a VAT rate with more than two decimals', function (): void {
-    expect(fn () => TaxLine::vat(1000, rate: '21.001'))
-        ->toThrow(InvalidArgumentException::class, 'A VAT rate has at most two decimals; 21.001 has more.');
-});
-
-it('refuses an E3 line, whose regime key is not confirmed: :dataset', function (?ExemptionReason $reason, string $default): void {
+it('sends an exemption reason as given: :dataset', function (?ExemptionReason $reason, string $default): void {
     config(['verifactu.exemption_reason' => $default]);
 
-    expect(fn (): TaxLine => TaxLine::exempt(1000, $reason))
-        ->toThrow(InvalidArgumentException::class, 'Exemption reason E3 (article 22) is not supported yet');
+    expect(TaxLine::exempt(1000, $reason)->toArray())->toBe(['tax_base' => '10.00', 'exemption_reason' => 'E3']);
 })->with([
     'given' => [ExemptionReason::ExportLikeOperations, 'E1'],
     'from the config' => [null, 'E3'],
