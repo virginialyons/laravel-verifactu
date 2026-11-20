@@ -10,7 +10,8 @@ use Vlec\Verifactu\Models\InvoiceBatch;
 
 /**
  * Every invoice of the batch has a result, and each was applied: an issued
- * one fired InvoiceIssued, a failed one InvoiceNotIssued.
+ * one fired InvoiceIssued, a refused one InvoiceNotIssued. One the service
+ * already held is sent again on its own, and fires InvoiceIssued later.
  */
 class InvoiceBatchCompleted
 {

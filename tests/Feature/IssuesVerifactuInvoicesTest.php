@@ -54,6 +54,23 @@ it('fires the event of a new status', function (string $status, string $event): 
     'cancelled' => ['cancelled', InvoiceCancelled::class],
 ]);
 
+it('passes AEAT\'s error on with the event of an invoice :dataset', function (string $status, string $event): void {
+    $invoice = Invoice::factory()->issued()->create();
+    Event::fake([$event]);
+
+    $invoice->storeVerifactuInvoice(serviceInvoice([
+        'status' => $status,
+        'aeat' => ['verification_code' => null, 'error_code' => '1105', 'error_message' => 'NIF no identificado.', 'registered_at' => null],
+    ]));
+
+    Event::assertDispatched($event, fn (InvoiceAcceptedWithErrors|InvoiceRejected $event): bool => $event->invoice->is($invoice)
+        && $event->errorCode === '1105'
+        && $event->errorMessage === 'NIF no identificado.');
+})->with([
+    'accepted with errors' => ['accepted_with_errors', InvoiceAcceptedWithErrors::class],
+    'rejected' => ['rejected', InvoiceRejected::class],
+]);
+
 it('fires no event when the status stays the same', function (): void {
     $invoice = Invoice::factory()->issued()->create(['aeat_status' => 'accepted']);
     Event::fake([InvoiceAccepted::class]);

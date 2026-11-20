@@ -108,15 +108,19 @@ it('refuses with a final 403, queueing nothing, a delivery with :dataset', funct
     'no v1' => [fn (string $body): string => 't='.now()->getTimestamp()],
     'no t' => [fn (string $body): string => Str::after(webhookSignature($body), ',')],
     'a t that is not a number' => [fn (string $body): string => 't=now,v1='.hash_hmac('sha256', "now.{$body}", 'whsec_secret-for-tests')],
+    'a t that is not whole seconds' => [fn (string $body): string => 't='.now()->getTimestamp().'.5,v1='.hash_hmac('sha256', now()->getTimestamp().".5.{$body}", 'whsec_secret-for-tests')],
     'no signature header' => [fn (string $body): ?string => null],
 ]);
 
-it('answers a 5xx while the webhook secret is not set, so the service retries', function (): void {
-    config(['verifactu.webhook_secret' => null]);
+it('answers a 5xx while the webhook secret is :dataset, so the service retries', function (?string $secret): void {
+    config(['verifactu.webhook_secret' => $secret]);
     $body = webhookBody('ping');
 
-    postWebhook($body, webhookSignature($body))->assertServerError();
-});
+    postWebhook($body, webhookSignature($body, secret: (string) $secret))->assertServerError();
+})->with([
+    'not set' => [null],
+    'empty' => [''],
+]);
 
 it('queues one refresh per known invoice in invoices.updated and skips the others', function (): void {
     Queue::fake();

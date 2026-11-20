@@ -7,6 +7,7 @@ namespace Vlec\Verifactu\Http\Controllers;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\Jobs\ApplyInvoiceBatch;
 use Vlec\Verifactu\Jobs\RefreshInvoice;
@@ -23,7 +24,7 @@ class WebhookController
     {
         // json() decodes the body whatever its Content-Type says.
         if ($request->json('event') === 'invoices.updated') {
-            $this->refreshInvoices(collect($request->json()->all('data'))->pluck('uuid')->all());
+            $this->refreshInvoices(Collection::make($request->json()->all('data'))->pluck('uuid')->all());
         }
 
         if ($request->json('event') === 'invoice_batch.completed') {

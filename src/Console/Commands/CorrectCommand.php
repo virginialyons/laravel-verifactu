@@ -21,7 +21,7 @@ class CorrectCommand extends Command
         /** @var class-string<Model&VerifactuInvoice> $model */
         $model = config()->string('verifactu.model');
 
-        $invoice = $model::query()->whereKey($this->argument('invoice'))->first();
+        $invoice = $model::query()->find($this->argument('invoice'));
 
         if ($invoice === null) {
             $this->components->error('There is no invoice with that key.');

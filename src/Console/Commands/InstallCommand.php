@@ -44,7 +44,7 @@ class InstallCommand extends Command
         $misplaced = $this->configKeysNotOnTheirOwnLine();
 
         if ($misplaced !== []) {
-            $this->components->error('config/verifactu.php must keep each of these keys on its own line, as published: '.Collection::make($misplaced)->join(', ').'.');
+            $this->components->error('config/verifactu.php must keep each of these keys on its own line, as published: '.Collection::make($misplaced)->join(', '));
 
             return self::FAILURE;
         }
@@ -252,7 +252,7 @@ class InstallCommand extends Command
             $this->files->get(__DIR__.'/../../../stubs/add_verifactu_columns.stub'),
         ));
 
-        $this->components->info("Wrote the migration {$name}, which adds ".Collection::make($columns)->join(', ', ' and ').'.');
+        $this->components->info("Wrote the migration {$name}, which adds ".Collection::make($columns)->join(', ', ' and '));
     }
 
     /**
@@ -374,7 +374,7 @@ class InstallCommand extends Command
 
         $this->components->bulletList([
             'Fill VERIFACTU_URL, VERIFACTU_TOKEN and VERIFACTU_WEBHOOK_SECRET in .env, then run php artisan migrate.',
-            'Give an administrator of the service this webhook URL: '.url(config()->string('verifactu.webhook_path')),
+            'Give an administrator of the service this webhook URL: '.route('verifactu.webhook'),
         ]);
 
         $class = class_basename($model);

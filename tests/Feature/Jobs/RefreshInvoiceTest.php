@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Vlec\Verifactu\Client;
 use Vlec\Verifactu\Events\InvoiceRejected;
 use Vlec\Verifactu\Exceptions\VerifactuException;
@@ -81,8 +82,9 @@ it('waits longer before each later attempt when the service gives no Retry-After
     $job->assertReleased(60);
 });
 
-it('waits for a read of the same invoice running on another worker', function (): void {
+it('waits five seconds for a read of the same invoice running on another worker', function (): void {
     config(['queue.default' => 'database']);
+    $this->freezeSecond();
     $invoice = Invoice::factory()->issued()->create();
     $job = new RefreshInvoice($invoice);
     Cache::lock((new WithoutOverlapping($invoice->verifactuReference()))->getLockKey($job), 60)->get();
@@ -93,5 +95,43 @@ it('waits for a read of the same invoice running on another worker', function ()
     $this->artisan('queue:work', ['--once' => true])->assertSuccessful();
 
     Http::assertNothingSent();
-    expect(DB::table('jobs')->count())->toBe(1);
+    expect(DB::table('jobs')->sole()->available_at)->toBe(now()->addSeconds(5)->getTimestamp());
+});
+
+it('lets another read of the invoice run a minute after a worker died reading it', function (): void {
+    $this->freezeSecond();
+    $invoice = Invoice::factory()->issued()->create();
+    $job = new RefreshInvoice($invoice);
+    $lock = (new WithoutOverlapping($invoice->verifactuReference()))->getLockKey($job);
+    $taken = [];
+    Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => function () use ($invoice, $lock, &$taken) {
+        // The lock this read holds, as a worker killed now would leave it.
+        $this->travel(59)->seconds();
+        $taken[] = Cache::lock($lock)->get();
+        $this->travel(1)->second();
+        $taken[] = Cache::lock($lock)->get();
+
+        return Http::response(['data' => serviceInvoice(['uuid' => $invoice->verifactu_uuid])]);
+    }]);
+
+    dispatch($job);
+
+    expect($taken)->toBe([false, true]);
+});
+
+it('lets the invoice be read again once the lock of a job lost while queued expires, within the hour', function (): void {
+    $this->freezeSecond();
+    Queue::fake([RefreshInvoice::class]);
+    $invoice = Invoice::factory()->issued()->create();
+    RefreshInvoice::dispatch($invoice);
+
+    $this->travel(3599)->seconds();
+    RefreshInvoice::dispatch($invoice);
+
+    Queue::assertPushedTimes(RefreshInvoice::class, 1);
+
+    $this->travel(1)->second();
+    RefreshInvoice::dispatch($invoice);
+
+    Queue::assertPushedTimes(RefreshInvoice::class, 2);
 });

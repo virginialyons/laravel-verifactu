@@ -58,3 +58,14 @@ it('never shows the token', function (): void {
 
     expect(Artisan::output())->not->toContain('token-for-tests');
 });
+
+it('fails without a token, in an unknown environment', function (): void {
+    config(['verifactu.token' => null]);
+
+    expect(Artisan::call('verifactu:status'))->toBe(1);
+
+    expect(Artisan::output())
+        ->toMatch('/Environment\W+Unknown/')
+        ->toContain('Set VERIFACTU_TOKEN');
+    Http::assertNothingSent();
+});

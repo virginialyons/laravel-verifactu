@@ -28,7 +28,7 @@ Run in order; stop at the first failure.
 | --- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Tracker complete         | Any row `Pending`, `In progress` or `Blocked`, or `Descoped` without the owner's recorded approval                                                             |
 | 2   | No blocking findings     | Any P0 or P1 in `.reviews/findings.md` is `open` or `fixed`                                                                                                    |
-| 3   | `composer test`          | Non-zero exit, or `vendor/bin/pest --mutate --min=90` fails                                                                                                    |
+| 3   | `composer test`          | Non-zero exit, or `composer test:mutate` (90% minimum) fails                                                                                                    |
 | 4   | "Done when" demonstrated | You can't name the artifact that showed each criterion: a real run against the service in Test, a recorded answer or webhook, a command's output. A green suite alone is not a demonstration |
 | 5   | Dependencies current     | `composer outdated --direct` lists a package with no upstream blocker recorded on the board                                                                    |
 | 6   | Skills current           | A skill copied from the service (`laravel-best-practices`, `spatie-*`, `testing-best-practices`) differs from the service's copy. Refresh it, then re-check     |

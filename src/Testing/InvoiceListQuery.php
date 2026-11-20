@@ -11,23 +11,30 @@ use Illuminate\Support\Str;
 
 /**
  * The query of GET /invoices: its filters, sorts, includes and page, as
- * the service reads them.
+ * the service reads them. Its constants are left out of mutation testing,
+ * which finds no test covering a constant's line; the list tests cover
+ * their values.
  *
  * @phpstan-type Row array{invoice: array<string, mixed>, body: array<mixed>, total: Number, position: int}
  */
 class InvoiceListQuery
 {
+    // @pest-mutate-ignore
     public const array Filters = [
         'number', 'invoice_number', 'external_reference', 'status', 'invoice_type',
         'recipient_tax_id', 'issue_date_from', 'issue_date_to', 'search',
     ];
 
+    // @pest-mutate-ignore
     public const array Sorts = ['issue_date', 'invoice_number', 'total_amount', 'created_at'];
 
+    // @pest-mutate-ignore
     public const array Includes = ['tax_lines', 'references', 'billing_records'];
 
+    // @pest-mutate-ignore
     protected const int DefaultPageSize = 25;
 
+    // @pest-mutate-ignore
     protected const int MaxPageSize = 100;
 
     /**
@@ -76,17 +83,6 @@ class InvoiceListQuery
         return $this->names('include');
     }
 
-    public function pageNumber(): int
-    {
-        $number = Arr::get($this->query, 'page.number');
-
-        if (is_numeric($number) && (int) $number >= 1) {
-            return (int) $number;
-        }
-
-        return 1;
-    }
-
     public function pageSize(): int
     {
         $size = Arr::get($this->query, 'page.size');
@@ -116,8 +112,8 @@ class InvoiceListQuery
         $invoice = $row['invoice'];
 
         return match ($filter) {
-            'status' => Str::of($value)->explode(',')->containsStrict(fn (string $status): bool => $status === $invoice['status']),
-            'invoice_type' => Str::of($value)->explode(',')->containsStrict(fn (string $type): bool => $type === ($row['body']['invoice_type'] ?? 'F1')),
+            'status' => Str::of($value)->explode(',')->containsStrict(Arr::string($invoice, 'status')),
+            'invoice_type' => Str::of($value)->explode(',')->containsStrict(Arr::string($row['body'], 'invoice_type', 'F1')),
             'recipient_tax_id' => Arr::get($row['body'], 'recipient.tax_id') === $value,
             'issue_date_from' => $invoice['issue_date'] >= $value,
             'issue_date_to' => $invoice['issue_date'] <= $value,

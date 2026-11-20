@@ -49,7 +49,7 @@ class Verifactu extends Facade
         $fake = static::getFacadeRoot();
 
         // A second call, such as in a test after a beforeEach, keeps the fake the first one made.
-        if (static::isFake() && $fake instanceof VerifactuFake) {
+        if ($fake instanceof VerifactuFake) {
             return $fake;
         }
 

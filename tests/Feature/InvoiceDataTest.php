@@ -125,6 +125,15 @@ it('groups lines with the same rate or exemption reason and adds up their bases'
         ->and($data->taxLines())->toHaveCount(2);
 });
 
+it('keeps lines exempt for different reasons apart', function (): void {
+    $data = InvoiceData::make('Exports')->lines([TaxLine::exempt(1000, ExemptionReason::Exports), TaxLine::exempt(2000, ExemptionReason::IntraEuSupplies)]);
+
+    expect($data->toArray()['lines'])->toBe([
+        ['tax_base' => '10.00', 'regime_key' => '02', 'exemption_reason' => 'E2'],
+        ['tax_base' => '20.00', 'exemption_reason' => 'E5'],
+    ]);
+});
+
 it('works the tax out once per grouped line', function (): void {
     $data = InvoiceData::make('Two pens')->lines([TaxLine::vat(25, rate: 10), TaxLine::vat(25, rate: 10)]);
 

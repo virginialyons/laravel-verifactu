@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -46,7 +47,7 @@ function createLegacyInvoicesTable(): void
 {
     Schema::create('legacy_invoices', function (Blueprint $table): void {
         $table->id();
-        $table->string('customer_name')->nullable();
+        $table->string('customer_name')->nullable()->index('legacy_customer_index');
         $table->string('number')->nullable();
         $table->string('hash')->nullable()->index('legacy_hash_index');
         $table->string('aeat_csv')->nullable();
@@ -75,7 +76,14 @@ function installOnLegacyInvoices(PendingCommand $command, string $printedNumber 
         ->expectsQuestion('Which column holds the bare number a corrective invoice refers to, such as 42?', 'verifactu_number')
         ->expectsQuestion('Which column holds the issue date?', 'verifactu_issue_date')
         ->expectsQuestion('Which column holds AEAT\'s verification URL?', 'verifactu_url')
-        ->expectsQuestion('Which column holds the QR code?', 'qr_code');
+        // qr_code is the table's own: nothing to create.
+        ->expectsChoice('Which column holds the QR code?', 'qr_code', Arr::except([
+            'customer_name' => 'customer_name',
+            'number' => 'number',
+            'hash' => 'hash',
+            'aeat_csv' => 'aeat_csv',
+            'qr_code' => 'qr_code',
+        ], $printedNumber));
 }
 
 /**
@@ -90,16 +98,25 @@ it('sets up the app on a table with its own number, hash and QR code', function 
     createLegacyInvoicesTable();
 
     installOnLegacyInvoices($this->artisan('verifactu:install'))
+        ->expectsOutputToContain('The config is in config/verifactu.php.')
         ->expectsOutputToContain('.env and .env.example have VERIFACTU_URL, VERIFACTU_TOKEN and VERIFACTU_WEBHOOK_SECRET.')
+        ->expectsOutputToContain('config/verifactu.php has the model and its columns.')
         ->expectsOutputToContain('Wrote the migration add_verifactu_columns_to_legacy_invoices_table, which adds verifactu_uuid, verifactu_status, verifactu_number, verifactu_issue_date and verifactu_url.')
         ->expectsOutputToContain('They were not dropped:')
+        ->expectsOutputToContain('⇂ hash')
         ->expectsOutputToContain('php artisan make:migration drop_old_aeat_columns_from_legacy_invoices_table')
+        ->expectsOutputToContain("Schema::table('legacy_invoices', function (Blueprint \$table) {")
         ->expectsOutputToContain("\$table->dropIndex('legacy_hash_index');")
+        ->doesntExpectOutputToContain('legacy_customer_index')
         ->expectsOutputToContain("\$table->dropColumn(['hash', 'aeat_csv']);")
+        ->expectsOutputToContain('    });')
+        ->expectsOutputToContain('Next:')
+        // The next steps are one write, which meets only the first expectation it matches: this one.
+        ->expectsOutputToContain('Give an administrator of the service this webhook URL: http://localhost/verifactu/webhook')
         ->expectsOutputToContain('Add to Vlec\Verifactu\Tests\Fixtures\App\Models\LegacyInvoice:')
         ->expectsOutputToContain('class LegacyInvoice extends Model implements VerifactuInvoice')
+        ->expectsOutputToContain('Schedule in routes/console.php:')
         ->expectsOutputToContain("Schedule::command('verifactu:refresh-pending')->hourly();")
-        ->expectsOutputToContain('http://localhost/verifactu/webhook')
         ->assertSuccessful();
 
     $config = require join_paths($this->base, 'config', 'verifactu.php');
@@ -249,5 +266,35 @@ it('fails for a class that is not a model', function (): void {
     $this->artisan('verifactu:install')
         ->expectsQuestion('Which model is the invoice?', 'InvoiceKind')
         ->expectsOutputToContain('Vlec\Verifactu\Tests\Fixtures\App\Models\InvoiceKind is not an Eloquent model.')
+        ->assertFailed();
+});
+
+it('lists every old AEAT column, whatever the case of its name', function (): void {
+    Schema::create('legacy_invoices', function (Blueprint $table): void {
+        $table->id();
+        $table->string('customer_name')->nullable();
+
+        foreach (['previousHash', 'sequential_number', 'aeat_response', 'signed_xml', 'csv'] as $column) {
+            $table->string($column)->nullable();
+        }
+    });
+
+    $this->artisan('verifactu:install')
+        ->expectsQuestion('Which model is the invoice?', 'LegacyInvoice')
+        ->expectsQuestion('Which column holds the invoice\'s id on the service?', 'verifactu_uuid')
+        ->expectsQuestion('Which column holds its status at AEAT?', 'verifactu_status')
+        ->expectsQuestion('Which column holds the number to print, such as FACT42?', 'verifactu_invoice_number')
+        ->expectsQuestion('Which column holds the bare number a corrective invoice refers to, such as 42?', 'verifactu_number')
+        ->expectsQuestion('Which column holds the issue date?', 'verifactu_issue_date')
+        ->expectsQuestion('Which column holds AEAT\'s verification URL?', 'verifactu_url')
+        ->expectsQuestion('Which column holds the QR code?', 'qr_code')
+        ->expectsOutputToContain("\$table->dropColumn(['previousHash', 'sequential_number', 'aeat_response', 'signed_xml', 'csv']);")
+        ->assertSuccessful();
+});
+
+it('requires the model', function (): void {
+    $this->artisan('verifactu:install')
+        ->expectsQuestion('Which model is the invoice?', '')
+        ->expectsOutputToContain('Required.')
         ->assertFailed();
 });

@@ -78,7 +78,7 @@ it('refuses a name the service finds too long, on the name field', function (): 
     $validator = validateCustomer(['tax_id' => 'A15022510', 'legal_name' => Str::repeat('A', 121)]);
 
     expect($validator->errors()->toArray())->toBe([
-        'legal_name' => ['AEAT takes a name of at most 120 characters.'],
+        'legal_name' => ['AEAT does not take this name.'],
     ]);
 });
 
@@ -103,8 +103,17 @@ it('passes at once when AEAT can\'t answer: :dataset', function (Closure $failur
     '503' => [fn (ResponseSequence $sequence) => $sequence->push(['message' => 'AEAT did not answer.', 'code' => 'aeat_unavailable'], 503, ['Retry-After' => '30'])],
     '429' => [fn (ResponseSequence $sequence) => $sequence->push(['message' => 'Too many.', 'code' => 'too_many_requests'], 429, ['Retry-After' => '30'])],
     'connection error' => [fn (ResponseSequence $sequence) => $sequence->pushFailedConnection()],
-    'an unknown result' => [fn (ResponseSequence $sequence) => $sequence->push(['data' => ['tax_id' => 'A15022510', 'result' => 'something_new', 'official_name' => null]])],
 ]);
+
+it('passes, and reports, when the service answers a result the package does not know', function (): void {
+    Exceptions::fake();
+    Http::fake(['verifactu.test/api/v1/tax-id-checks' => Http::response(['data' => ['tax_id' => 'A15022510', 'result' => 'something_new', 'official_name' => null]])]);
+
+    expect(validateCustomer(['tax_id' => 'A15022510', 'legal_name' => 'Acme S.L.'])->passes())->toBeTrue();
+    Http::assertSentCount(1);
+    Exceptions::assertReported(fn (VerifactuException $exception): bool => Str::contains($exception->getMessage(), 'something_new')
+        && $exception->status === 200);
+});
 
 it('asks nothing without a tax ID and a name: :dataset', function (array $customer): void {
     Http::fake();

@@ -16,6 +16,7 @@ This repository is a Laravel package. Keep the package focused, idiomatic, and e
 - Formatting check: `composer lint:check`
 - Static analysis: `composer analyse`
 - Pest tests: `composer test:unit`
+- Mutation testing: `composer test:mutate` (at least 90%; the tests declare no `covers()`, so it runs with `--everything`)
 - Workbench build: `composer build`
 - Workbench server: `composer serve`
 

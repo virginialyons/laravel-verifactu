@@ -8,9 +8,9 @@ use Illuminate\Database\Eloquent\Model;
 use Vlec\Verifactu\InvoiceBatchStatus;
 
 /**
- * A batch sent to the service. Its status stays as the service first
- * answered until its items are applied to the app's invoices, so a batch
- * whose completion webhook was missed can be found and applied later.
+ * A batch sent to the service. It stays queued until its items are applied
+ * to the app's invoices, so a batch whose completion webhook was missed, or
+ * came before the batch was stored, can be found and applied later.
  *
  * @property string $uuid
  * @property InvoiceBatchStatus $status

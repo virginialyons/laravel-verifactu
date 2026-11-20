@@ -43,6 +43,9 @@ use Vlec\Verifactu\TaxIdCheckResult;
  * on the sync queue, not with Queue::fake(). Call Verifactu::fake() before
  * any catch-all Http::fake(), whose answers would come first.
  *
+ * Its constants are left out of mutation testing, which finds no test
+ * covering a constant's line; the fake's tests cover their values.
+ *
  * @phpstan-type Invoice array{uuid: string, environment: string|null, status: string, series: string, number: string, invoice_number: string, issue_date: string, total_amount: numeric-string, external_reference: string|null, verification_url: string, qr_code: string, hash: string|null, aeat: Aeat}
  * @phpstan-type Aeat array{verification_code: string|null, error_code: string|null, error_message: string|null, registered_at: string|null}
  * @phpstan-type Refusal array{status: int, code: string, message: string, errors?: array<string, list<string>>}
@@ -63,11 +66,15 @@ class VerifactuFake extends Client implements Fake
 
     /**
      * What a correction may change on each line, besides the description.
+     *
+     * @pest-mutate-ignore
      */
     protected const array CorrectableLineFields = ['regime_key', 'operation_qualification', 'exemption_reason'];
 
     /**
      * A tax line as the service answers it, with its defaults.
+     *
+     * @pest-mutate-ignore
      */
     protected const array TaxLine = [
         'tax_type' => '01',
@@ -80,6 +87,13 @@ class VerifactuFake extends Client implements Fake
         'equivalence_surcharge_rate' => null,
         'equivalence_surcharge_amount' => null,
     ];
+
+    /**
+     * An invoice's AEAT answer while its last record awaits one.
+     *
+     * @pest-mutate-ignore
+     */
+    protected const array NoAeatAnswer = ['verification_code' => null, 'error_code' => null, 'error_message' => null, 'registered_at' => null];
 
     /**
      * The issued invoices, by uuid.
@@ -103,13 +117,6 @@ class VerifactuFake extends Client implements Fake
     protected array $corrections = [];
 
     /**
-     * The uuids of the invoices cancelled.
-     *
-     * @var list<string>
-     */
-    protected array $cancellations = [];
-
-    /**
      * Each invoice's AEAT records, oldest first, by uuid.
      *
      * @var array<string, non-empty-list<BillingRecord>>
@@ -130,6 +137,7 @@ class VerifactuFake extends Client implements Fake
      */
     protected array $replies = [];
 
+    // @pest-mutate-ignore
     protected int $lastNumber = 0;
 
     /**
@@ -220,7 +228,7 @@ class VerifactuFake extends Client implements Fake
             $recordStatus = InvoiceStatus::Accepted->value;
         }
 
-        $aeat = ['verification_code' => null, 'error_code' => $errorCode, 'error_message' => $errorMessage, 'registered_at' => null];
+        $aeat = [...self::NoAeatAnswer, 'error_code' => $errorCode, 'error_message' => $errorMessage];
 
         if ($status !== InvoiceStatus::Rejected) {
             $aeat['verification_code'] = 'A-'.Str::upper(Str::random(14));
@@ -303,7 +311,7 @@ class VerifactuFake extends Client implements Fake
         $uuid = $this->uuidOf($invoice);
 
         PHPUnit::assertTrue(
-            $uuid !== null && Collection::make($this->cancellations)->containsStrict($uuid),
+            $uuid !== null && Collection::make($this->records[$uuid])->whereStrict('type', 'cancellation')->isNotEmpty(),
             "The invoice [{$invoice->verifactuReference()}] was not cancelled on Verifactu.",
         );
     }
@@ -315,7 +323,7 @@ class VerifactuFake extends Client implements Fake
     protected function answer(Request $request): ?PromiseInterface
     {
         $segments = Str::of(Str::after($request->uri()->path(), 'api/v1/'))->explode('/');
-        $uuid = (string) $segments->get(1);
+        $uuid = $segments->get(1, '');
 
         if ($segments->has(1)) {
             $segments->put(1, '{uuid}');
@@ -426,7 +434,7 @@ class VerifactuFake extends Client implements Fake
             ->values()
             ->all();
 
-        return Http::response($this->page($request, $invoices, $query->pageNumber(), $query->pageSize(), 'page.number'));
+        return Http::response($this->page($request, $invoices, $query->pageSize(), 'page.number'));
     }
 
     protected function show(string $uuid): PromiseInterface
@@ -457,8 +465,7 @@ class VerifactuFake extends Client implements Fake
         }
 
         $this->corrections[$uuid] = $body;
-
-        $this->sendRecord($uuid, 'registration');
+        $this->invoices[$uuid] = [...$this->invoices[$uuid], ...$this->sendRecord($uuid, 'registration')];
 
         return Http::response(['data' => $this->invoices[$uuid]], 201);
     }
@@ -475,9 +482,7 @@ class VerifactuFake extends Client implements Fake
             return $this->refuse($refusal);
         }
 
-        $this->cancellations[] = $uuid;
-
-        $this->sendRecord($uuid, 'cancellation');
+        $this->invoices[$uuid] = [...$this->invoices[$uuid], ...$this->sendRecord($uuid, 'cancellation')];
 
         return Http::response(['data' => $this->invoices[$uuid]], 201);
     }
@@ -572,14 +577,7 @@ class VerifactuFake extends Client implements Fake
             return $this->notFound();
         }
 
-        $page = $request->uri()->query()->get('page');
-        $number = 1;
-
-        if (is_numeric($page) && (int) $page >= 1) {
-            $number = (int) $page;
-        }
-
-        return Http::response($this->page($request, $this->batches[$uuid]['items'], $number, 100, 'page'));
+        return Http::response($this->page($request, $this->batches[$uuid]['items'], 100, 'page'));
     }
 
     /**
@@ -629,7 +627,6 @@ class VerifactuFake extends Client implements Fake
         $this->invoices[$uuid] = [
             'uuid' => $uuid,
             'environment' => $this->environment()?->value,
-            'status' => InvoiceStatus::Pending->value,
             'series' => self::Series,
             'number' => $number,
             'invoice_number' => $invoiceNumber,
@@ -643,22 +640,22 @@ class VerifactuFake extends Client implements Fake
                 'importe' => $total,
             ]),
             'qr_code' => self::QrCode,
-            'hash' => null,
-            'aeat' => ['verification_code' => null, 'error_code' => null, 'error_message' => null, 'registered_at' => null],
+            ...$this->sendRecord($uuid, 'registration'),
         ];
 
         $this->requests[$uuid] = $body;
-
-        $this->sendRecord($uuid, 'registration');
 
         return $this->invoices[$uuid];
     }
 
     /**
-     * Generates the invoice's next AEAT record, which awaits AEAT's answer:
-     * the invoice is pending, with the record's hash and no answer yet.
+     * Generates the invoice's next AEAT record, which awaits AEAT's answer,
+     * and gives what the invoice shows meanwhile: pending, with the
+     * record's hash and no answer yet.
+     *
+     * @return array{status: string, hash: string, aeat: Aeat}
      */
-    protected function sendRecord(string $uuid, string $type): void
+    protected function sendRecord(string $uuid, string $type): array
     {
         $recordUuid = (string) Str::uuid();
         $hash = Str::upper(hash('sha256', $recordUuid));
@@ -671,12 +668,7 @@ class VerifactuFake extends Client implements Fake
             'generated_at' => $this->now()->toIso8601String(),
         ]];
 
-        $this->invoices[$uuid] = [
-            ...$this->invoices[$uuid],
-            'status' => InvoiceStatus::Pending->value,
-            'hash' => $hash,
-            'aeat' => ['verification_code' => null, 'error_code' => null, 'error_message' => null, 'registered_at' => null],
-        ];
+        return ['status' => InvoiceStatus::Pending->value, 'hash' => $hash, 'aeat' => self::NoAeatAnswer];
     }
 
     /**
@@ -775,7 +767,8 @@ class VerifactuFake extends Client implements Fake
 
     /**
      * The order of fields never matters; the order of lines and of the
-     * invoices a correction refers to does, so lists keep theirs.
+     * invoices a correction refers to does, and sorting a list by its keys
+     * keeps it.
      *
      * @param  array<mixed>  $value
      * @return array<mixed>
@@ -789,10 +782,6 @@ class VerifactuFake extends Client implements Fake
 
             return $item;
         });
-
-        if (Arr::isList($value)) {
-            return $value;
-        }
 
         return Collection::make($value)->sortKeys()->all();
     }
@@ -855,8 +844,9 @@ class VerifactuFake extends Client implements Fake
     {
         $body = $this->lastBody($uuid);
 
+        // Without lines, the invoice has one line for the whole total, exempt with E1.
         /** @var list<array<string, mixed>> $lines */
-        $lines = $body['lines'] ?? [['tax_base' => $this->invoices[$uuid]['total_amount'], 'exemption_reason' => 'E1']];
+        $lines = $body['lines'] ?? [['tax_base' => $this->invoices[$uuid]['total_amount']]];
 
         /** @var list<array{number?: string, invoice_number?: string, issue_date: string}> $corrected */
         $corrected = Arr::get($body, 'correction.corrected_invoices', []);
@@ -916,14 +906,10 @@ class VerifactuFake extends Client implements Fake
 
     protected function uuidOf(Model&VerifactuInvoice $invoice): ?string
     {
-        $uuid = Collection::make($this->invoices)
-            ->firstWhere('external_reference', '===', $invoice->verifactuReference())['uuid'] ?? null;
-
-        if (! is_string($uuid)) {
-            return null;
-        }
-
-        return $uuid;
+        return Collection::make($this->invoices)
+            ->whereStrict('external_reference', $invoice->verifactuReference())
+            ->keys()
+            ->first();
     }
 
     /**
@@ -934,11 +920,16 @@ class VerifactuFake extends Client implements Fake
      * @param  string  $pageKey  The query key of the page number, in dot notation, such as "page.number".
      * @return array<string, mixed>
      */
-    protected function page(Request $request, array $items, int $number, int $size, string $pageKey): array
+    protected function page(Request $request, array $items, int $size, string $pageKey): array
     {
         $query = $request->uri()->query()->all();
+        $requested = Arr::pull($query, $pageKey);
+        $number = 1;
 
-        Arr::forget($query, $pageKey);
+        // The paginator, as the forPage() slice, reads a number below 1 as the first page.
+        if (is_numeric($requested)) {
+            $number = (int) $requested;
+        }
 
         $paginator = new LengthAwarePaginator(
             Collection::make($items)->forPage($number, $size)->values(),

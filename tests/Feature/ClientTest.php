@@ -52,6 +52,7 @@ it('sends each operation to its endpoint with the token', function (Closure $cal
     'createInvoiceBatch' => [fn () => Verifactu::createInvoiceBatch(['invoices' => [$invoice]]), 'POST', 'invoice-batches', ['invoices' => [$invoice]]],
     'getInvoiceBatch' => [fn () => Verifactu::getInvoiceBatch('uuid-1'), 'GET', 'invoice-batches/uuid-1', null],
     'listInvoiceBatchItems' => [fn () => Verifactu::listInvoiceBatchItems('uuid-1', page: 2), 'GET', 'invoice-batches/uuid-1/items?page=2', null],
+    'listInvoiceBatchItems from the first page' => [fn () => Verifactu::listInvoiceBatchItems('uuid-1'), 'GET', 'invoice-batches/uuid-1/items?page=1', null],
 ]);
 
 it('returns the resource of a single answer and the whole page of a list', function (): void {
@@ -138,6 +139,7 @@ it('throws a 422 at once with its code and errors', function (): void {
         ->toThrow(function (VerifactuException $exception): void {
             expect($exception->getMessage())->toBe('Invoices of type F1 need a recipient.')
                 ->and($exception->status)->toBe(422)
+                ->and($exception->getCode())->toBe(422)
                 ->and($exception->errorCode)->toBe('recipient_required')
                 ->and($exception->errors)->toBe(['recipient' => ['Invoices of type F1 need a recipient.']])
                 ->and($exception->isRetryable())->toBeFalse();
@@ -145,6 +147,14 @@ it('throws a 422 at once with its code and errors', function (): void {
     Http::assertSentCount(1);
     Sleep::assertNeverSlept();
 });
+
+it('never retries a refusal: :dataset', function (int $status): void {
+    Http::fake(['verifactu.test/api/v1/invoices/uuid-1' => Http::response(['message' => 'Refused.'], $status)]);
+
+    expect(fn () => Verifactu::getInvoice('uuid-1'))
+        ->toThrow(fn (VerifactuException $exception) => expect($exception->isRetryable())->toBeFalse());
+    Http::assertSentCount(1);
+})->with([400, 404, 499]);
 
 it('throws a 409 that needs a person at once', function (): void {
     Http::fake(['verifactu.test/api/v1/invoices/uuid-1/cancellation' => Http::response([
@@ -191,6 +201,7 @@ it('throws a retryable exception when the service never answers', function (): v
     expect(fn () => Verifactu::getInvoice('uuid-1'))
         ->toThrow(function (VerifactuException $exception): void {
             expect($exception->status)->toBeNull()
+                ->and($exception->getCode())->toBe(0)
                 ->and($exception->isRetryable())->toBeTrue();
         });
     Http::assertSentCount(3);

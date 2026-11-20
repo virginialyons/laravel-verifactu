@@ -8,6 +8,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\ResponseSequence;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
@@ -164,11 +165,13 @@ it('fails, not retries, when a status listener breaks after the invoice was stor
 it('is released to store the invoice on the retry when the database fails after the service issued it', function (): void {
     $invoice = Invoice::factory()->create();
     Event::fake([InvoiceIssued::class, InvoiceNotIssued::class]);
+    Exceptions::fake();
     Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['data' => serviceInvoice()], 201)]);
     Schema::table('invoices', fn ($table) => $table->renameColumn('number', 'printed_number'));
 
     issueJob($invoice)->assertReleased(10)->assertNotFailed();
 
+    Exceptions::assertReported(QueryException::class);
     Event::assertNotDispatched(InvoiceIssued::class);
     Event::assertNotDispatched(InvoiceNotIssued::class);
 });
@@ -199,15 +202,32 @@ it('gives a later send a new Idempotency-Key, so a fixed refusal is sent again',
     expect((new IssueInvoice($invoice))->idempotencyKey)->not->toBe((new IssueInvoice($invoice))->idempotencyKey);
 });
 
-it('waits longer before each later attempt', function (): void {
+it('waits longer before each later attempt, up to five minutes: attempt :dataset', function (int $attempt, int $delay): void {
     $invoice = Invoice::factory()->create();
     Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['message' => 'Error.'], 500)]);
     $job = (new IssueInvoice($invoice))->withFakeQueueInteractions();
-    $job->job->attempts = 3;
+    $job->job->attempts = $attempt;
 
     $job->handle(app(Client::class));
 
-    $job->assertReleased(60);
+    $job->assertReleased($delay);
+})->with([
+    [1, 10],
+    [2, 30],
+    [3, 60],
+    [4, 300],
+    [9, 300],
+]);
+
+it('queues the job to retry for the 24 hours the service replays its key, failing at the first exception it does not release', function (): void {
+    config(['queue.default' => 'database']);
+    $this->freezeSecond();
+
+    Invoice::factory()->create()->sendToVerifactu();
+
+    expect(json_decode((string) DB::table('jobs')->value('payload'), true))
+        ->retryUntil->toBe(now()->addDay()->getTimestamp())
+        ->maxExceptions->toBe(1);
 });
 
 it('fails on any other refusal and fires InvoiceNotIssued', function (): void {
@@ -237,9 +257,25 @@ it('does not report an issued invoice as not issued when a listener fails', func
     $invoice->sendToVerifactu();
     $this->artisan('queue:work', ['--once' => true]);
 
-    expect($invoice->fresh()->verifactu_uuid)->not->toBeNull();
+    expect($invoice->fresh()->verifactu_uuid)->not->toBeNull()
+        ->and(DB::table('failed_jobs')->count())->toBe(1)
+        ->and(DB::table('jobs')->count())->toBe(0);
     Event::assertNotDispatched(InvoiceNotIssued::class);
 });
+
+it('fires InvoiceNotIssued without an error code when the job fails :dataset', function (?Throwable $exception, string $message): void {
+    $invoice = Invoice::factory()->create();
+    Event::fake([InvoiceNotIssued::class]);
+
+    (new IssueInvoice($invoice))->failed($exception);
+
+    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice)
+        && $event->errorCode === null
+        && $event->message === $message);
+})->with([
+    'on another exception' => [new RuntimeException('The worker timed out.'), 'The worker timed out.'],
+    'without an exception' => [null, 'The job failed.'],
+]);
 
 it('queues one job for an invoice sent twice', function (): void {
     config(['queue.default' => 'database']);
@@ -257,4 +293,21 @@ it('sends nothing for an invoice already on Verifactu', function (): void {
     issueJob($invoice);
 
     Http::assertNothingSent();
+});
+
+it('lets the invoice be sent again once the lock of a lost job expires, after the 24 hours of retries', function (): void {
+    $this->freezeSecond();
+    Queue::fake([IssueInvoice::class]);
+    $invoice = Invoice::factory()->create();
+    $invoice->sendToVerifactu();
+
+    $this->travel(89999)->seconds();
+    $invoice->sendToVerifactu();
+
+    Queue::assertPushedTimes(IssueInvoice::class, 1);
+
+    $this->travel(1)->second();
+    $invoice->sendToVerifactu();
+
+    Queue::assertPushedTimes(IssueInvoice::class, 2);
 });

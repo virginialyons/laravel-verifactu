@@ -2,9 +2,16 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Vlec\Verifactu\Client;
+use Vlec\Verifactu\Jobs\ApplyInvoiceBatch;
+use Vlec\Verifactu\Jobs\RefreshInvoice;
+use Vlec\Verifactu\Jobs\SendInvoiceBatch;
+use Vlec\Verifactu\Models\InvoiceBatch;
 use Vlec\Verifactu\VerifactuServiceProvider;
+use Workbench\App\Models\Invoice;
 
 it('binds the client as a singleton', function (): void {
     expect(app(Client::class))->toBe(app(Client::class));
@@ -41,3 +48,17 @@ it('never shows the token or the webhook secret on about', function (): void {
         ->doesntExpectOutputToContain('secret-for-tests')
         ->assertSuccessful();
 });
+
+it('runs its other jobs on the configured queue too: :dataset', function (Closure $job): void {
+    config(['verifactu.queue' => 'invoices']);
+    Queue::fake();
+
+    $job = $job();
+    dispatch($job);
+
+    Queue::assertPushedOn('invoices', $job::class);
+})->with([
+    'RefreshInvoice' => [fn () => new RefreshInvoice(Invoice::factory()->make(['id' => 1]))],
+    'SendInvoiceBatch' => [fn () => new SendInvoiceBatch(Collection::make([Invoice::factory()->make(['id' => 1])]))],
+    'ApplyInvoiceBatch' => [fn () => new ApplyInvoiceBatch(new InvoiceBatch(['uuid' => 'a-batch']))],
+]);

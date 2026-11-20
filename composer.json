@@ -78,6 +78,9 @@
         "test:unit": [
             "vendor/bin/pest --parallel"
         ],
+        "test:mutate": [
+            "@php -d memory_limit=1G vendor/bin/pest --mutate --everything --parallel --min=90"
+        ],
         "test": [
             "@analyse",
             "@lint:check",

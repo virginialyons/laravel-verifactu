@@ -193,7 +193,8 @@ class Client
         $result = TaxIdCheckResult::tryFrom($check['result']);
 
         if ($result === null) {
-            throw new VerifactuException("The service answered an unknown tax-ID check result: {$check['result']}.");
+            // An answer, not an outage: status 200 makes it non-retryable, so KnownToAeat reports it.
+            throw new VerifactuException("The service answered an unknown tax-ID check result: {$check['result']}.", status: 200);
         }
 
         return new TaxIdCheck($result, $check['official_name']);

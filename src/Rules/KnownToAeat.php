@@ -54,7 +54,7 @@ class KnownToAeat implements DataAwareRule, ValidationRule
             }
 
             if ($exception->errorCode === 'invalid_recipient_name') {
-                $fail($this->nameField, 'AEAT takes a name of at most 120 characters.')->translate();
+                $fail($this->nameField, 'AEAT does not take this name.')->translate();
 
                 return;
             }

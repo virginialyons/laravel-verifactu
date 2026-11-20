@@ -47,9 +47,6 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
 
     public function handle(Client $client): void
     {
-        // Loaded when the job was queued: another job may have applied the batch since.
-        $this->batch->refresh();
-
         if ($this->batch->isApplied()) {
             return;
         }
@@ -107,7 +104,7 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
         $invoices = $this->invoices(Collection::make($items)->map(fn (array $item): ?string => $item['external_reference']));
 
         foreach ($items as $item) {
-            $invoice = $invoices->get((string) $item['external_reference']);
+            $invoice = $invoices->get($item['external_reference']);
 
             // Not the app's invoice, or already stored, for instance sent again on its own.
             if ($invoice === null || $invoice->isOnVerifactu()) {

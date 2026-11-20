@@ -36,7 +36,7 @@ class RefreshPendingCommand extends Command
             $batches++;
         }
 
-        $this->components->info("Queued a refresh of {$invoices} pending ".Str::plural('invoice', $invoices)." and the application of {$batches} ".Str::plural('batch', $batches).'.');
+        $this->components->info("Found {$invoices} pending ".Str::plural('invoice', $invoices)." to refresh and {$batches} ".Str::plural('batch', $batches).' to apply.');
 
         return self::SUCCESS;
     }

@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
@@ -87,10 +89,12 @@ it('keeps one Idempotency-Key across the retries of a send, and gives a later se
 it('is released to store the batch on the retry when the database fails after the service took it', function (): void {
     $invoices = Invoice::factory()->count(2)->create();
     Event::fake([InvoiceNotIssued::class]);
+    Exceptions::fake();
     Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::response(['data' => serviceBatch()], 202)]);
     Schema::rename('verifactu_invoice_batches', 'batches_away');
 
     $job = sendBatchJob($invoices)->assertReleased(10);
+    Exceptions::assertReported(QueryException::class);
 
     Schema::rename('batches_away', 'verifactu_invoice_batches');
     $job->withFakeQueueInteractions()->handle(app(Client::class));
@@ -147,3 +151,18 @@ it('fails on a refusal and fires InvoiceNotIssued for each invoice', function ()
     Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1])
         && $event->errorCode === 'validation_failed');
 });
+
+it('fires InvoiceNotIssued without an error code when the job fails :dataset', function (?Throwable $exception, string $message): void {
+    $invoices = Invoice::factory()->count(2)->create();
+    Event::fake([InvoiceNotIssued::class]);
+
+    (new SendInvoiceBatch($invoices))->failed($exception);
+
+    Event::assertDispatchedTimes(InvoiceNotIssued::class, 2);
+    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1])
+        && $event->errorCode === null
+        && $event->message === $message);
+})->with([
+    'on another exception' => [new RuntimeException('The worker timed out.'), 'The worker timed out.'],
+    'without an exception' => [null, 'The job failed.'],
+]);

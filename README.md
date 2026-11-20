@@ -257,6 +257,8 @@ The service judges each invoice on its own: one it refuses doesn't stop the othe
 
 Don't change the invoices while their batch is being sent. If the first answer is lost and an invoice changed before the retry, the service refuses the retry, and every invoice of the batch fires `InvoiceNotIssued`. Sending them again stores the invoices the service did issue.
 
+A batch whose completion webhook is missed, or arrives before the job has stored the batch, is applied by the next `verifactu:refresh-pending`.
+
 ## Fixing and cancelling
 
 ```php
@@ -366,7 +368,7 @@ Its messages go through Laravel's translator. For Spanish, add them to `lang/es.
     "AEAT does not accept this tax ID with this name.": "AEAT no acepta este NIF con este nombre.",
     "AEAT holds this tax ID as: :name": "AEAT tiene este NIF como: :name",
     "This is not a valid Spanish tax ID.": "Este NIF no es válido.",
-    "AEAT takes a name of at most 120 characters.": "AEAT admite un nombre de 120 caracteres como máximo."
+    "AEAT does not take this name.": "AEAT no admite este nombre."
 }
 ```
 

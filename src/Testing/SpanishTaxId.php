@@ -21,17 +21,17 @@ class SpanishTaxId
         $taxId = Str::upper($taxId);
 
         if (Str::isMatch('/^\d{8}[A-Z]$/', $taxId)) {
-            return $taxId[8] !== self::personalLetter(Str::substr($taxId, 0, 8));
+            return $taxId[8] !== self::personalLetter((int) Str::substr($taxId, 0, -1));
         }
 
         if (Str::isMatch('/^[XYZ]\d{7}[A-Z]$/', $taxId)) {
-            $number = Str::swap(['X' => '0', 'Y' => '1', 'Z' => '2'], $taxId[0]).Str::substr($taxId, 1, 7);
+            $number = Str::swap(['X' => '0', 'Y' => '1', 'Z' => '2'], $taxId[0]).Str::substr($taxId, 1, -1);
 
-            return $taxId[8] !== self::personalLetter($number);
+            return $taxId[8] !== self::personalLetter((int) $number);
         }
 
         if (Str::isMatch('/^[KLM]\d{7}[A-Z]$/', $taxId)) {
-            return $taxId[8] !== self::personalLetter(Str::substr($taxId, 1, 7));
+            return $taxId[8] !== self::personalLetter((int) Str::substr($taxId, 1, -1));
         }
 
         if (Str::isMatch('/^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/', $taxId)) {
@@ -41,9 +41,9 @@ class SpanishTaxId
         return true;
     }
 
-    protected static function personalLetter(string $number): string
+    protected static function personalLetter(int $number): string
     {
-        return self::PersonalLetters[(int) $number % 23];
+        return self::PersonalLetters[$number % 23];
     }
 
     /**
@@ -52,7 +52,7 @@ class SpanishTaxId
      */
     protected static function entityControlIsWrong(string $taxId): bool
     {
-        $digit = self::entityControlDigit(Str::substr($taxId, 1, 7));
+        $digit = self::entityControlDigit(Str::substr($taxId, 1, -1));
         $letter = self::EntityLetters[$digit];
         $control = $taxId[8];
 
@@ -72,15 +72,17 @@ class SpanishTaxId
      */
     protected static function entityControlDigit(string $digits): int
     {
-        $sum = Str::of($digits)->split(1)->reduce(function (int $sum, string $digit, int $position): int {
-            if ($position % 2 === 1) {
-                return $sum + (int) $digit;
-            }
+        $sum = Str::of($digits)->split(1)
+            ->map(fn (string $digit): int => (int) $digit)
+            ->reduce(function (int $sum, int $digit, int $position): int {
+                if ($position % 2 === 1) {
+                    return $sum + $digit;
+                }
 
-            $double = (int) $digit * 2;
+                $double = $digit * 2;
 
-            return $sum + intdiv($double, 10) + $double % 10;
-        }, 0);
+                return $sum + intdiv($double, 10) + $double % 10;
+            }, 0);
 
         return (10 - $sum % 10) % 10;
     }

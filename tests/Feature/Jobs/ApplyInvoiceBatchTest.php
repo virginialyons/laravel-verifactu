@@ -119,17 +119,6 @@ it('applies a batch only once', function (): void {
     Event::assertDispatchedTimes(InvoiceBatchCompleted::class, 1);
 });
 
-it('does nothing for a batch another job applied after this one was queued', function (): void {
-    $batch = queuedBatch();
-    $job = (new ApplyInvoiceBatch($batch))->withFakeQueueInteractions();
-    $batch->update(['status' => InvoiceBatchStatus::Completed]);
-    Http::fake();
-
-    $job->handle(app(Client::class));
-
-    Http::assertNothingSent();
-});
-
 it('leaves a batch still running for later', function (): void {
     $invoices = Invoice::factory()->count(2)->create();
     $batch = queuedBatch();
@@ -192,4 +181,21 @@ it('applies nothing when a page cannot be read, and is released to read them all
         ->and($batch->fresh()->status)->toBe(InvoiceBatchStatus::Queued);
     Event::assertNotDispatched(InvoiceIssued::class);
     Event::assertNotDispatched(InvoiceBatchCompleted::class);
+});
+
+it('lets the batch be applied again once the lock of a lost job expires, after the 24 hours of retries', function (): void {
+    $this->freezeSecond();
+    Queue::fake([ApplyInvoiceBatch::class]);
+    $batch = queuedBatch();
+    ApplyInvoiceBatch::dispatch($batch);
+
+    $this->travel(89999)->seconds();
+    ApplyInvoiceBatch::dispatch($batch);
+
+    Queue::assertPushedTimes(ApplyInvoiceBatch::class, 1);
+
+    $this->travel(1)->second();
+    ApplyInvoiceBatch::dispatch($batch);
+
+    Queue::assertPushedTimes(ApplyInvoiceBatch::class, 2);
 });

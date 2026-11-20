@@ -23,7 +23,7 @@ it('refreshes only the invoices pending for over an hour', function (): void {
     Queue::fake([RefreshInvoice::class, ApplyInvoiceBatch::class]);
 
     $this->artisan('verifactu:refresh-pending')
-        ->expectsOutputToContain('Queued a refresh of 1 pending invoice and the application of 0 batches.')
+        ->expectsOutputToContain('Found 1 pending invoice to refresh and 0 batches to apply.')
         ->assertSuccessful();
 
     Queue::assertPushed(RefreshInvoice::class, 1);
@@ -54,7 +54,7 @@ it('applies the batches not applied yet', function (): void {
     Queue::fake([ApplyInvoiceBatch::class]);
 
     $this->artisan('verifactu:refresh-pending')
-        ->expectsOutputToContain('Queued a refresh of 0 pending invoices and the application of 2 batches.')
+        ->expectsOutputToContain('Found 0 pending invoices to refresh and 2 batches to apply.')
         ->assertSuccessful();
 
     Queue::assertPushed(ApplyInvoiceBatch::class, 2);

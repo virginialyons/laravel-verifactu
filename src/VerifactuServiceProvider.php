@@ -73,7 +73,7 @@ class VerifactuServiceProvider extends ServiceProvider
                 'URL' => $url,
                 'Environment' => $client->environment()->name ?? 'Unknown',
                 'Invoice model' => config('verifactu.model'),
-                'Webhook URL' => url(config()->string('verifactu.webhook_path')),
+                'Webhook URL' => route('verifactu.webhook'),
             ];
         });
     }

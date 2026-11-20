@@ -11,7 +11,9 @@ use Illuminate\Support\Str;
 
 /**
  * What the service checks in the body of an invoice before it issues or
- * corrects it, with the error code it answers for each rule.
+ * corrects it, with the error code it answers for each rule. Its constants
+ * are left out of mutation testing, which finds no test covering a
+ * constant's line; the tests of each rule cover their values.
  *
  * @phpstan-type Error array{code: string, field: string, message: string}
  */
@@ -19,21 +21,57 @@ class InvoiceRules
 {
     public const string InvalidTaxId = 'The tax ID is not a valid Spanish tax ID (NIF, DNI or NIE): its format or check letter is wrong.';
 
+    // @pest-mutate-ignore
     protected const array AssignedByService = [
         'issue_date' => 'issue_date_is_assigned_by_service',
         'series' => 'series_is_assigned_by_service',
         'number' => 'number_is_assigned_by_service',
     ];
 
+    // @pest-mutate-ignore
     protected const array InvoiceTypes = ['F1', 'F2', 'F3', 'R1', 'R2', 'R3', 'R4', 'R5'];
 
+    // @pest-mutate-ignore
     protected const array TypesWithoutRecipient = ['F2', 'R5'];
+
+    /**
+     * The ISO 3166-1 alpha-2 codes the service takes as a recipient's
+     * country_code, as its OpenAPI lists them.
+     *
+     * @pest-mutate-ignore
+     */
+    protected const array CountryCodes = [
+        'AD', 'AE', 'AF', 'AG', 'AI', 'AL', 'AM', 'AO', 'AQ', 'AR', 'AS', 'AT', 'AU', 'AW', 'AZ', 'BA',
+        'BB', 'BD', 'BE', 'BF', 'BG', 'BH', 'BI', 'BJ', 'BM', 'BN', 'BO', 'BQ', 'BR', 'BS', 'BT', 'BV',
+        'BW', 'BY', 'BZ', 'CA', 'CC', 'CD', 'CF', 'CG', 'CH', 'CI', 'CK', 'CL', 'CM', 'CN', 'CO', 'CR',
+        'CU', 'CV', 'CW', 'CX', 'CY', 'CZ', 'DE', 'DJ', 'DK', 'DM', 'DO', 'DZ', 'EC', 'EE', 'EG', 'ER',
+        'ES', 'ET', 'FI', 'FJ', 'FK', 'FM', 'FO', 'FR', 'GA', 'GB', 'GD', 'GE', 'GG', 'GH', 'GI', 'GL',
+        'GM', 'GN', 'GQ', 'GR', 'GS', 'GT', 'GU', 'GW', 'GY', 'HK', 'HM', 'HN', 'HR', 'HT', 'HU', 'ID',
+        'IE', 'IL', 'IM', 'IN', 'IO', 'IQ', 'IR', 'IS', 'IT', 'JE', 'JM', 'JO', 'JP', 'KE', 'KG', 'KH',
+        'KI', 'KM', 'KN', 'KP', 'KR', 'KW', 'KY', 'KZ', 'LA', 'LB', 'LC', 'LI', 'LK', 'LR', 'LS', 'LT',
+        'LU', 'LV', 'LY', 'MA', 'MC', 'MD', 'ME', 'MG', 'MH', 'MK', 'ML', 'MM', 'MN', 'MO', 'MP', 'MR',
+        'MS', 'MT', 'MU', 'MV', 'MW', 'MX', 'MY', 'MZ', 'NA', 'NC', 'NE', 'NF', 'NG', 'NI', 'NL', 'NO',
+        'NP', 'NR', 'NU', 'NZ', 'OM', 'PA', 'PE', 'PF', 'PG', 'PH', 'PK', 'PL', 'PM', 'PN', 'PR', 'PS',
+        'PT', 'PW', 'PY', 'QA', 'RE', 'RO', 'RS', 'RU', 'RW', 'SA', 'SB', 'SC', 'SD', 'SE', 'SG', 'SH',
+        'SI', 'SK', 'SL', 'SM', 'SN', 'SO', 'SR', 'SS', 'ST', 'SV', 'SX', 'SY', 'SZ', 'TC', 'TD', 'TF',
+        'TG', 'TH', 'TJ', 'TK', 'TL', 'TM', 'TN', 'TO', 'TR', 'TT', 'TV', 'TW', 'TZ', 'UA', 'UG', 'UM',
+        'US', 'UY', 'UZ', 'VA', 'VC', 'VE', 'VG', 'VI', 'VN', 'VU', 'WF', 'WS', 'YE', 'YT', 'ZA', 'ZM',
+        'ZW',
+    ];
+
+    /**
+     * What identifies a foreign recipient.
+     *
+     * @pest-mutate-ignore
+     */
+    protected const array ForeignId = ['country_code', 'id_type', 'id'];
 
     /**
      * An amount as the service takes it: a decimal string with a dot.
      */
     protected const string Amount = '/^-?\d{1,12}(\.\d{1,2})?$/';
 
+    // @pest-mutate-ignore
     protected const array LineAmounts = ['tax_base', 'tax_amount', 'equivalence_surcharge_amount'];
 
     /**
@@ -41,8 +79,10 @@ class InvoiceRules
      */
     protected const string Rate = '/^\d{1,3}(\.\d{1,2})?$/';
 
+    // @pest-mutate-ignore
     protected const array LineRates = ['tax_rate', 'equivalence_surcharge_rate'];
 
+    // @pest-mutate-ignore
     protected const int MaxLines = 12;
 
     protected const string SimplifiedInvoiceLimit = '3000.00';
@@ -142,6 +182,7 @@ class InvoiceRules
 
         $total = Arr::string($body, 'total_amount');
 
+        // The amount rule has checked the total; is_numeric() tells PHPStan so.
         if ($type === 'F2' && is_numeric($total) && (new Number($total))->compare(self::SimplifiedInvoiceLimit) > 0) {
             return self::error('simplified_invoice_over_limit', 'total_amount', 'A simplified invoice (F2) cannot exceed 3,000.00.');
         }
@@ -150,6 +191,19 @@ class InvoiceRules
 
         if (is_string($taxId) && SpanishTaxId::isInvalid($taxId)) {
             return self::error('invalid_tax_id', 'recipient.tax_id', self::InvalidTaxId);
+        }
+
+        $countryCode = Arr::get($body, 'recipient.country_code');
+
+        if ($countryCode !== null && Collection::make(self::CountryCodes)->doesntContainStrict($countryCode)) {
+            return self::error('invalid_country_code', 'recipient.country_code', 'The recipient\'s country_code is not an ISO 3166-1 alpha-2 code.');
+        }
+
+        $intraEuSupply = $lines->contains(fn (array $line): bool => Arr::get($line, 'exemption_reason') === 'E5');
+        $withoutForeignId = Collection::make(self::ForeignId)->contains(fn (string $field): bool => blank(Arr::get($body, "recipient.{$field}")));
+
+        if ($intraEuSupply && $withoutForeignId) {
+            return self::error('exempt_intra_eu_supply_requires_foreign_recipient', 'recipient', 'Exemption E5 (exempt supply to another EU country) needs a recipient identified by a foreign ID: country_code, id_type and id.');
         }
 
         $references = Collection::make(Arr::wrap(Arr::get($body, 'correction.corrected_invoices', [])))
