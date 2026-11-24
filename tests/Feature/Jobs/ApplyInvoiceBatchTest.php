@@ -52,7 +52,7 @@ function batchItems(Collection $invoices, array $failed = []): array
         return ['index' => $index, 'external_reference' => $reference, 'result' => 'issued', 'invoice' => serviceInvoice([
             'uuid' => "invoice-uuid-{$number}",
             'number' => $number,
-            'invoice_number' => "FACT{$number}",
+            'invoice_number' => sprintf('FACT-2026-%05d', $number),
             'external_reference' => $reference,
         ]), 'error' => null];
     })->all();
@@ -93,7 +93,7 @@ it('applies a batch of 150 from two pages: 149 issued and stored, 1 failed, each
 
     Http::assertSentCount(3);
     expect(Invoice::query()->whereNotNull('verifactu_uuid')->count())->toBe(149)
-        ->and($invoices[0]->fresh())->number->toBe('FACT1')->short_number->toBe('1')->qr->toBe('iVBORw0KGgo=')
+        ->and($invoices[0]->fresh())->number->toBe('FACT-2026-00001')->short_number->toBe('1')->qr->toBe('iVBORw0KGgo=')
         ->and($invoices[120]->fresh()->verifactu_uuid)->toBeNull()
         ->and($batch->fresh()->status)->toBe(InvoiceBatchStatus::CompletedWithErrors);
     Event::assertDispatchedTimes(InvoiceIssued::class, 149);
@@ -146,7 +146,7 @@ it('skips items of invoices it does not know or has already stored', function ()
     Event::assertDispatchedTimes(InvoiceIssued::class, 1);
     Event::assertDispatched(InvoiceIssued::class, fn (InvoiceIssued $event): bool => $event->invoice->is($invoices[1]));
     expect($invoices[0]->fresh()->verifactu_uuid)->toBeNull()
-        ->and($alreadyStored->fresh()->number)->toBe('FACT42');
+        ->and($alreadyStored->fresh()->number)->toBe('FACT-2026-00042');
 });
 
 it('sends an item already issued by another send on its own, to store that invoice, instead of reporting it', function (): void {

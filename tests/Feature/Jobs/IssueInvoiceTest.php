@@ -54,7 +54,7 @@ it('issues the invoice through the database queue once it is committed', functio
 
     expect($invoice->fresh())
         ->aeat_status->toBe(InvoiceStatus::Pending)
-        ->number->toBe('FACT42');
+        ->number->toBe('FACT-2026-00042');
     Event::assertDispatchedTimes(InvoiceIssued::class);
     Http::assertSentCount(1);
 });

@@ -2,6 +2,16 @@
 
 All notable changes to `vlec/laravel-verifactu` are recorded here. Each release's notes are added when it is published on GitHub.
 
+## v0.1.1 - 2026-11-24
+
+`Verifactu::fake()` now numbers invoices the way the Verifactu service does.
+
+- **Yearly numbers:** invoice numbers are printed `SERIES-YYYY-NNNNN`, such as `FACT-2026-00042`. `number` is the counter within the series and the issue year, and it starts again at 1 every 1 January (Madrid time).
+- **References by number:** a corrected or replaced invoice referenced by `number` is matched with the year of its `issue_date`: `number` `5` with `issue_date` `2025-03-01` is `FACT-2025-00005`.
+- **Refused reference numbers:** a reference `number` that is not a whole number from 1, such as `A-1` or `07`, is refused with `422` `invalid_referenced_invoice`, as the service refuses it.
+
+If your tests expected numbers such as `FACT1`, expect `FACT-2026-00001` instead.
+
 ## v0.1.0 - 2026-11-20
 
 The first release: issue VERI*FACTU invoices from a Laravel app through the Verifactu service.

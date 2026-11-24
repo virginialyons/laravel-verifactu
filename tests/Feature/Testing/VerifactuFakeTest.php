@@ -48,7 +48,7 @@ it('issues an invoice and plays AEAT\'s acceptance through the real jobs', funct
     expect($invoice->fresh())
         ->verifactu_uuid->toBeString()
         ->aeat_status->toBe(InvoiceStatus::Accepted)
-        ->number->toBe('FACT1')
+        ->number->toBe('FACT-2026-00001')
         ->short_number->toBe('1')
         ->issued_on->toDateString()->toBe('2026-11-19')
         ->verification_url->toStartWith('https://prewww2.aeat.es/')
@@ -62,8 +62,23 @@ it('numbers invoices in order', function (): void {
     $first->sendToVerifactu();
     $second->sendToVerifactu();
 
-    expect($first->fresh()->number)->toBe('FACT1')
-        ->and($second->fresh()->number)->toBe('FACT2');
+    expect($first->fresh()->number)->toBe('FACT-2026-00001')
+        ->and($second->fresh()->number)->toBe('FACT-2026-00002');
+});
+
+it('numbers invoices from 00001 again on 1 January, Madrid time', function (): void {
+    Verifactu::fake();
+    Verifactu::createInvoice(sale());
+
+    $this->travelTo('2026-12-31 22:59:59');
+    $lastOfTheYear = Verifactu::createInvoice(sale(['external_reference' => 'order-2']));
+    $this->travelTo('2026-12-31 23:00:00');
+    $firstOfTheYear = Verifactu::createInvoice(sale(['external_reference' => 'order-3']));
+    $secondOfTheYear = Verifactu::createInvoice(sale(['external_reference' => 'order-4']));
+
+    expect($lastOfTheYear)->issue_date->toBe('2026-12-31')->number->toBe('2')->invoice_number->toBe('FACT-2026-00002')
+        ->and($firstOfTheYear)->issue_date->toBe('2027-01-01')->number->toBe('1')->invoice_number->toBe('FACT-2027-00001')
+        ->and($secondOfTheYear)->number->toBe('2')->invoice_number->toBe('FACT-2027-00002');
 });
 
 it('hands the callback the body the invoice was issued from', function (): void {
@@ -98,7 +113,7 @@ it('completes a batch at once and applies it', function (): void {
 
     Verifactu::assertBatchSent();
     $invoices->each(fn (Invoice $invoice) => Verifactu::assertIssued($invoice));
-    expect($invoices->fresh()->pluck('number')->all())->toBe(['FACT1', 'FACT2', 'FACT3'])
+    expect($invoices->fresh()->pluck('number')->all())->toBe(['FACT-2026-00001', 'FACT-2026-00002', 'FACT-2026-00003'])
         ->and(InvoiceBatch::sole()->status)->toBe(InvoiceBatchStatus::Completed);
     Event::assertDispatchedTimes(InvoiceIssued::class, 3);
     Event::assertDispatched(InvoiceBatchCompleted::class, fn (InvoiceBatchCompleted $event): bool => $event->succeeded === 3);
@@ -115,7 +130,7 @@ it('stores the invoice already issued when it is sent again', function (): void 
 
     expect($invoice->fresh())
         ->verifactu_uuid->toBe($uuid)
-        ->number->toBe('FACT1');
+        ->number->toBe('FACT-2026-00001');
 });
 
 it('fixes and cancels an invoice once AEAT has answered', function (): void {
@@ -198,7 +213,7 @@ it('completes a batch when the test fakes every event', function (): void {
 
     Verifactu::sendBatch($invoices);
 
-    expect($invoices->fresh()->pluck('number')->all())->toBe(['FACT1', 'FACT2']);
+    expect($invoices->fresh()->pluck('number')->all())->toBe(['FACT-2026-00001', 'FACT-2026-00002']);
     Event::assertDispatchedTimes(InvoiceIssued::class, 2);
 });
 
@@ -208,7 +223,7 @@ it('reads a batch of more than one page of items', function (): void {
 
     Verifactu::sendBatch($invoices);
 
-    expect($invoices->last()->fresh()->number)->toBe('FACT101');
+    expect($invoices->last()->fresh()->number)->toBe('FACT-2026-00101');
     Http::assertSent(fn (Request $request): bool => Str::endsWith($request->url(), '/items?page=2'));
 });
 
@@ -221,8 +236,8 @@ it('stores an invoice of a batch that was issued before on its own', function ()
 
     Verifactu::sendBatch([$issued->fresh(), $new]);
 
-    expect($issued->fresh())->verifactu_uuid->toBe($uuid)->number->toBe('FACT1')
-        ->and($new->fresh()->number)->toBe('FACT2');
+    expect($issued->fresh())->verifactu_uuid->toBe($uuid)->number->toBe('FACT-2026-00001')
+        ->and($new->fresh()->number)->toBe('FACT-2026-00002');
 });
 
 it('refuses a batch that repeats a reference, naming the items, as the service does', function (): void {
@@ -604,7 +619,7 @@ it('filters the list of invoices by :dataset', function (array $filter, array $r
     expect(Collection::make($list['data'])->pluck('external_reference')->all())->toBe($references);
 })->with([
     'number' => [['number' => '2'], ['order-2']],
-    'invoice number' => [['invoice_number' => 'FACT3'], ['ORDER-3']],
+    'invoice number' => [['invoice_number' => 'FACT-2026-00003'], ['ORDER-3']],
     'external reference' => [['external_reference' => 'order-1'], ['order-1']],
     // Read as one status, "rejected,pending" would match none.
     'several statuses' => [['status' => 'rejected,pending'], ['order-1', 'order-2', 'ORDER-3']],
@@ -614,13 +629,13 @@ it('filters the list of invoices by :dataset', function (array $filter, array $r
     'issue dates' => [['issue_date_from' => '2026-11-20', 'issue_date_to' => '2026-11-20'], ['order-2']],
     'a search in the reference, whatever its case' => [['search' => 'der-3'], ['ORDER-3']],
     'a search in the customer\'s name' => [['search' => 'pérez'], ['ORDER-3']],
-    'a search in the full number' => [['search' => 'FACT2'], ['order-2']],
+    'a search in the full number' => [['search' => 'FACT-2026-00002'], ['order-2']],
     'a search in the customer\'s tax ID' => [['search' => '345678Z'], ['ORDER-3']],
 ]);
 
 it('sorts the list of invoices by :dataset', function (?string $sort, array $references): void {
     Verifactu::fake();
-    // Numbered FACT1 to FACT3 in this order, on dates that are not.
+    // Numbered FACT-2026-00001 to FACT-2026-00003 in this order, on dates that are not.
     $this->travelTo('2026-11-21 10:00:00');
     Verifactu::createInvoice(sale(['external_reference' => 'order-1', 'total_amount' => '50.00']));
     $this->travelTo('2026-11-19 10:00:00');
@@ -719,7 +734,7 @@ it('includes the tax lines, references and AEAT records of each invoice in the l
         ->toBe([['registration', 'accepted'], ['cancellation', 'pending']])
         ->and(Arr::last($cancelled['billing_records'])['hash'])->toBe($cancelled['hash'])
         ->and(Arr::first($cancelled['billing_records']))->toHaveKey('uuid')->generated_at->toBe('2026-11-19T11:00:00+01:00')
-        ->and($refund['references'])->toBe([['kind' => 'corrected', 'invoice_number' => 'FACT1', 'issue_date' => '2026-11-19']]);
+        ->and($refund['references'])->toBe([['kind' => 'corrected', 'invoice_number' => 'FACT-2026-00001', 'issue_date' => '2026-11-19']]);
 });
 
 it('replays the first answer to a repeated Idempotency-Key, refusals included', function (): void {
@@ -837,7 +852,10 @@ it('refuses an invoice body as the service does: :dataset', function (array $bod
     'a rate with three decimals' => [sale(['lines' => [['tax_base' => '100.00', 'operation_qualification' => 'S1', 'tax_rate' => '21.001', 'tax_amount' => '21.00']]]), 'invalid_tax_rate', 'lines.0.tax_rate'],
     'a corrected invoice without its date' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '7']]]]), 'field_required', 'correction.corrected_invoices.0.issue_date'],
     'a corrected invoice without its number' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0'],
-    'a replaced invoice by both numbers' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['number' => '7', 'invoice_number' => 'FACT7', 'issue_date' => '2026-11-02']]]), 'invalid_referenced_invoice', 'replaced_invoices.0'],
+    'a replaced invoice by both numbers' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['number' => '7', 'invoice_number' => 'FACT-2026-00007', 'issue_date' => '2026-11-02']]]), 'invalid_referenced_invoice', 'replaced_invoices.0'],
+    'a corrected invoice by number 0' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '0', 'issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.number'],
+    'a corrected invoice by a number with a leading zero' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '07', 'issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.number'],
+    'a corrected invoice by a number of 19 digits' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => Str::repeat('9', 19), 'issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.number'],
     'a description over 500 characters' => [sale(['description' => Str::repeat('a', 501)]), 'invalid_description', 'description'],
     'a blank customer\'s name' => [sale(['recipient' => ['tax_id' => 'A15022510', 'name' => ' ']]), 'invalid_recipient_name', 'recipient.name'],
     'lines that are not a list' => [sale(['lines' => ['first' => ['tax_base' => '121.00', 'exemption_reason' => 'E1']]]), 'invalid_lines', 'lines'],
@@ -860,6 +878,7 @@ it('issues an invoice at the edge of the service\'s rules: :dataset', function (
     'a simplified invoice of 3,000.00' => [sale(['invoice_type' => 'F2', 'recipient' => null, 'total_amount' => '3000.00', 'lines' => [['tax_base' => '3000.00', 'exemption_reason' => 'E1']]])],
     'a full invoice over 3,000.00' => [sale(['total_amount' => '3630.00', 'lines' => [['tax_base' => '3000.00', 'operation_qualification' => 'S1', 'tax_rate' => '21', 'tax_amount' => '630.00']]])],
     'an intra-EU supply to a customer with a foreign ID' => [sale(['recipient' => foreignCustomer(), 'lines' => [['tax_base' => '121.00', 'exemption_reason' => 'E5']]])],
+    'a corrected invoice by a number of 18 digits' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => Str::repeat('9', 18), 'issue_date' => '2026-11-02']]]])],
 ]);
 
 it('refuses a second invoice with the same external reference, as the service does', function (): void {
@@ -882,7 +901,7 @@ it('issues an invoice pending AEAT\'s answer, with the verification URL AEAT pri
         ->status->toBe('pending')
         ->hash->toMatch('/^[0-9A-F]{64}$/')
         ->aeat->toBe(['verification_code' => null, 'error_code' => null, 'error_message' => null, 'registered_at' => null])
-        ->verification_url->toBe('https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B00000000&numserie=FACT1&fecha=19-11-2026&importe=121.00');
+        ->verification_url->toBe('https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B00000000&numserie=FACT-2026-00001&fecha=19-11-2026&importe=121.00');
 });
 
 it('lists an invoice sent without lines with one exempt line for its total', function (): void {
@@ -911,8 +930,44 @@ it('lists the simplified invoices an F3 replaces among its references', function
 
     expect(Verifactu::listInvoices(['include' => 'references'])['data'][0]['references'])->toBe([
         ['kind' => 'replaced', 'invoice_number' => 'T-7', 'issue_date' => '2026-11-02'],
-        ['kind' => 'replaced', 'invoice_number' => 'FACT8', 'issue_date' => '2026-11-03'],
+        ['kind' => 'replaced', 'invoice_number' => 'FACT-2026-00008', 'issue_date' => '2026-11-03'],
     ]);
+});
+
+it('names an invoice referenced by number with the series and the year of its issue_date', function (): void {
+    Verifactu::fake();
+    Verifactu::createInvoice(sale([
+        'invoice_type' => 'R1',
+        'total_amount' => '-24.20',
+        'lines' => [['tax_base' => '-20.00', 'operation_qualification' => 'S1', 'tax_rate' => '21', 'tax_amount' => '-4.20']],
+        'correction' => ['method' => 'difference', 'corrected_invoices' => [
+            ['number' => '5', 'issue_date' => '2025-03-01'],
+            ['number' => '123456', 'issue_date' => '2026-11-02'],
+        ]],
+    ]));
+
+    expect(Arr::pluck(Verifactu::listInvoices(['include' => 'references'])['data'][0]['references'], 'invoice_number'))
+        ->toBe(['FACT-2025-00005', 'FACT-2026-123456']);
+});
+
+it('lists a reference by number whose issue_date is not a date without failing', function (): void {
+    Verifactu::fake();
+    Verifactu::createInvoice(sale(['invoice_type' => 'F3', 'replaced_invoices' => [['number' => '8', 'issue_date' => 'nope']]]));
+
+    expect(Verifactu::listInvoices(['include' => 'references'])['data'][0]['references'][0]['issue_date'])->toBe('nope');
+});
+
+it('refuses a reference whose number is not a whole number, naming the series', function (): void {
+    Verifactu::fake();
+    $message = 'The number is a whole number such as 42: the invoice\'s number within the series FACT and the year of its issue_date.';
+
+    expect(refusalOf(fn () => Verifactu::createInvoice(sale([
+        'invoice_type' => 'F3',
+        'replaced_invoices' => [['number' => '8', 'issue_date' => '2026-11-02'], ['number' => 'FACT-2026-00009', 'issue_date' => '2026-11-03']],
+    ]))))
+        ->status->toBe(422)
+        ->errorCode->toBe('invalid_referenced_invoice')
+        ->errors->toBe(['replaced_invoices.1.number' => [$message]]);
 });
 
 it('hands the service\'s refusal of an invoice the app described wrongly to InvoiceNotIssued', function (): void {
@@ -951,7 +1006,7 @@ it('fails the batch item the service refuses, with the fields', function (): voi
 
     expect($issued)
         ->toMatchArray(['index' => 0, 'external_reference' => 'order-1', 'result' => 'issued', 'error' => null])
-        ->invoice->invoice_number->toBe('FACT1')
+        ->invoice->invoice_number->toBe('FACT-2026-00001')
         ->and($failed)->toBe([
             'index' => 1,
             'external_reference' => 'order-2',

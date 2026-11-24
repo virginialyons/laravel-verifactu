@@ -25,7 +25,7 @@ it('stores an answer in the configured columns, with the status and date cast', 
     expect($invoice->fresh())
         ->verifactu_uuid->toBe('9d2c4b1e-0f6a-4c1b-9a59-6f1f2b3c4d5e')
         ->aeat_status->toBe(InvoiceStatus::Pending)
-        ->number->toBe('FACT42')
+        ->number->toBe('FACT-2026-00042')
         ->short_number->toBe('42')
         ->issued_on->toDateString()->toBe('2026-11-19')
         ->verification_url->toStartWith('https://prewww2.aeat.es/')

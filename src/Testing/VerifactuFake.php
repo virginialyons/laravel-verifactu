@@ -34,10 +34,12 @@ use Vlec\Verifactu\TaxIdCheckResult;
 /**
  * Plays the Verifactu service in the app's tests: it answers the package's
  * requests like the service, refusals included, so the real jobs, events
- * and IssuesVerifactuInvoices concern run. It numbers invoices in order,
- * keeps them in memory and completes batches at once; decide() plays
- * AEAT's answer. The requests it doesn't play, such as an invoice's XML,
- * are left to the app's own Http::fake(), or reported as stray.
+ * and IssuesVerifactuInvoices concern run. It numbers invoices in order
+ * within each issue year (FACT-2026-00001, FACT-2026-00002…, then
+ * FACT-2027-00001), keeps them in memory and completes batches at once;
+ * decide() plays AEAT's answer. The requests it doesn't play, such as an
+ * invoice's XML, are left to the app's own Http::fake(), or reported as
+ * stray.
  *
  * Its invoices live in the test's memory, so the jobs must run in the test:
  * on the sync queue, not with Queue::fake(). Call Verifactu::fake() before
@@ -137,8 +139,12 @@ class VerifactuFake extends Client implements Fake
      */
     protected array $replies = [];
 
-    // @pest-mutate-ignore
-    protected int $lastNumber = 0;
+    /**
+     * The last number given in each issue year, by year.
+     *
+     * @var array<int, int>
+     */
+    protected array $lastNumbers = [];
 
     /**
      * AEAT's answer to every tax-ID check.
@@ -614,12 +620,12 @@ class VerifactuFake extends Client implements Fake
      */
     protected function store(array $body): array
     {
-        $this->lastNumber++;
-
         $uuid = (string) Str::uuid();
-        $number = (string) $this->lastNumber;
-        $invoiceNumber = self::Series.$number;
         $issueDate = $this->now();
+        $year = $issueDate->year;
+        $this->lastNumbers[$year] = ($this->lastNumbers[$year] ?? 0) + 1;
+        $number = $this->lastNumbers[$year];
+        $invoiceNumber = $this->invoiceNumber($year, $number);
 
         /** @var array{total_amount: numeric-string, external_reference?: string|null} $body InvoiceRules let it through */
         $total = $body['total_amount'];
@@ -628,7 +634,7 @@ class VerifactuFake extends Client implements Fake
             'uuid' => $uuid,
             'environment' => $this->environment()?->value,
             'series' => self::Series,
-            'number' => $number,
+            'number' => (string) $number,
             'invoice_number' => $invoiceNumber,
             'issue_date' => $issueDate->toDateString(),
             'total_amount' => $total,
@@ -692,7 +698,7 @@ class VerifactuFake extends Client implements Fake
      */
     protected function invalidity(array $body): ?array
     {
-        $error = InvoiceRules::firstError($body);
+        $error = InvoiceRules::firstError($body, self::Series);
 
         if ($error === null) {
             return null;
@@ -848,10 +854,10 @@ class VerifactuFake extends Client implements Fake
         /** @var list<array<string, mixed>> $lines */
         $lines = $body['lines'] ?? [['tax_base' => $this->invoices[$uuid]['total_amount']]];
 
-        /** @var list<array{number?: string, invoice_number?: string, issue_date: string}> $corrected */
+        /** @var list<array{number: string, issue_date: string}|array{invoice_number: string, issue_date: string}> $corrected InvoiceRules let them through */
         $corrected = Arr::get($body, 'correction.corrected_invoices', []);
 
-        /** @var list<array{number?: string, invoice_number?: string, issue_date: string}> $replaced */
+        /** @var list<array{number: string, issue_date: string}|array{invoice_number: string, issue_date: string}> $replaced InvoiceRules let them through */
         $replaced = $body['replaced_invoices'] ?? [];
 
         return [
@@ -883,14 +889,30 @@ class VerifactuFake extends Client implements Fake
     }
 
     /**
-     * @param  array{number?: string, invoice_number?: string, issue_date: string}  $invoice
+     * A reference by number names an invoice of the series in the year of
+     * its issue_date.
+     *
+     * @param  array{number: string, issue_date: string}|array{invoice_number: string, issue_date: string}  $invoice
      * @return array{kind: string, invoice_number: string, issue_date: string}
      */
     protected function reference(string $kind, array $invoice): array
     {
-        $invoiceNumber = $invoice['invoice_number'] ?? self::Series.($invoice['number'] ?? '');
+        if (isset($invoice['invoice_number'])) {
+            return ['kind' => $kind, 'invoice_number' => $invoice['invoice_number'], 'issue_date' => $invoice['issue_date']];
+        }
 
-        return ['kind' => $kind, 'invoice_number' => $invoiceNumber, 'issue_date' => $invoice['issue_date']];
+        $year = (int) Str::before($invoice['issue_date'], '-');
+
+        return ['kind' => $kind, 'invoice_number' => $this->invoiceNumber($year, (int) $invoice['number']), 'issue_date' => $invoice['issue_date']];
+    }
+
+    /**
+     * The printed invoice number, such as FACT-2026-00042: the series, the
+     * issue year and the number padded to 5 digits, which it may outgrow.
+     */
+    protected function invoiceNumber(int $year, int $number): string
+    {
+        return sprintf('%s-%04d-%05d', self::Series, $year, $number);
     }
 
     /**

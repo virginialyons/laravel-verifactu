@@ -413,7 +413,7 @@ class InstallCommand extends Command
         return match ($field) {
             'uuid' => 'the invoice\'s id on the service',
             'status' => 'its status at AEAT',
-            'invoice_number' => 'the number to print, such as FACT42',
+            'invoice_number' => 'the number to print, such as FACT-2026-00042',
             'number' => 'the bare number a corrective invoice refers to, such as 42',
             'issue_date' => 'the issue date',
             'verification_url' => 'AEAT\'s verification URL',

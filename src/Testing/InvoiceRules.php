@@ -88,12 +88,20 @@ class InvoiceRules
     protected const string SimplifiedInvoiceLimit = '3000.00';
 
     /**
-     * The first rule the body breaks, or null when it keeps them all.
+     * A reference's number: the invoice's number within its series and
+     * year, a whole number from 1 without leading zeros, of up to 18
+     * digits so that it fits an integer.
+     */
+    protected const string ReferencedNumber = '/^[1-9]\d{0,17}$/';
+
+    /**
+     * The first rule the body breaks, or null when it keeps them all. The
+     * series is the app's, which a reference by number belongs to.
      *
      * @param  array<mixed>  $body
      * @return Error|null
      */
-    public static function firstError(array $body): ?array
+    public static function firstError(array $body, string $series): ?array
     {
         foreach (self::AssignedByService as $field => $code) {
             if (Arr::exists($body, $field)) {
@@ -222,6 +230,16 @@ class InvoiceRules
 
         if ($wrongReference !== false) {
             return self::error('invalid_referenced_invoice', $wrongReference, 'A corrected or replaced invoice is referenced wrongly: send number or invoice_number, not both, with its issue_date.');
+        }
+
+        $wrongNumber = $references->search(function (array $invoice): bool {
+            $number = Arr::get($invoice, 'number');
+
+            return is_string($number) && ! Str::isMatch(self::ReferencedNumber, $number);
+        });
+
+        if ($wrongNumber !== false) {
+            return self::error('invalid_referenced_invoice', "{$wrongNumber}.number", "The number is a whole number such as 42: the invoice's number within the series {$series} and the year of its issue_date.");
         }
 
         return null;

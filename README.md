@@ -83,7 +83,7 @@ The columns, each of which you may rename:
 | ------------------ | --------------------------- | ------------------------------------------------------------- |
 | `uuid`             | `verifactu_uuid`            | The invoice's id on the service                               |
 | `status`           | `verifactu_status`          | Its status at AEAT, cast to `Vlec\Verifactu\InvoiceStatus`    |
-| `invoice_number`   | `verifactu_invoice_number`  | The number to print, such as `FACT42`                         |
+| `invoice_number`   | `verifactu_invoice_number`  | The number to print, such as `FACT-2026-00042`                |
 | `number`           | `verifactu_number`          | The bare number a corrective invoice refers to, such as `42`  |
 | `issue_date`       | `verifactu_issue_date`      | The issue date, cast to a date unless the model casts it      |
 | `verification_url` | `verifactu_url`             | AEAT's verification URL                                       |
@@ -399,7 +399,7 @@ $submissions = Verifactu::http()
 
 ## Testing
 
-`Verifactu::fake()` replaces the service with an in-memory one that answers as the service does: it numbers invoices in order (`FACT1`, `FACT2`…), completes batches at once, and refuses what the service refuses. Your tests run the package's real jobs, model methods and events, with no HTTP.
+`Verifactu::fake()` replaces the service with an in-memory one that answers as the service does: it numbers invoices in order within each issue year (`FACT-2026-00001`, `FACT-2026-00002`…, then `FACT-2027-00001`), completes batches at once, and refuses what the service refuses. Your tests run the package's real jobs, model methods and events, with no HTTP.
 
 ```php
 use Illuminate\Support\Facades\Event;

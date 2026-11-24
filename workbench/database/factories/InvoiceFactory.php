@@ -32,7 +32,7 @@ class InvoiceFactory extends Factory
         return $this->state([
             'verifactu_uuid' => fake()->uuid(),
             'aeat_status' => 'pending',
-            'number' => "FACT{$number}",
+            'number' => sprintf('FACT-%s-%05d', substr($issueDate, 0, 4), $number),
             'short_number' => $number,
             'issued_on' => $issueDate,
         ]);

@@ -66,7 +66,7 @@ it('builds the body of the service example :dataset', function (Closure $build, 
     'several-vat-rates' => [fn () => InvoiceData::make('Factura con varios IVAs')->to($business)->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'several-vat-rates'],
     'simplified' => [fn () => InvoiceData::make('Factura simplificada')->simplified()->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'simplified'],
     'simplified-credit-note' => [fn () => InvoiceData::make('Factura de canje, opción 1: abono de la simplificada')->simplified()->lines([TaxLine::vat(-20000, rate: 21)]), 'simplified-credit-note'],
-    'replaces-simplified' => [fn () => InvoiceData::make('Factura de canje, opción 2: sustitutiva (F3)')->to($business)->lines([TaxLine::vat(20000, rate: 21)])->replacing(issuedInvoice('S-1', '2026-10-02', simplified: true)), 'replaces-simplified'],
+    'replaces-simplified' => [fn () => InvoiceData::make('Factura de canje, opción 2: sustitutiva (F3)')->to($business)->lines([TaxLine::vat(20000, rate: 21)])->replacing(issuedInvoice('1', '2026-10-02', simplified: true)), 'replaces-simplified'],
     'credit-note' => [fn () => InvoiceData::make('Factura de abono')->to($business)->lines([TaxLine::vat(-20000, rate: 21)]), 'credit-note'],
     'export-of-goods' => [fn () => InvoiceData::make('Factura extracomunitaria - Exportación de bienes')->to(Recipient::foreign('Nombre destinatario', 'US', ForeignIdType::Passport, 'M76543210'))->lines([TaxLine::exempt(20000, ExemptionReason::Exports)]), 'export-of-goods'],
     'intra-eu-goods' => [fn () => InvoiceData::make('Factura B2B intracomunitaria - Venta de bienes')->to(Recipient::foreign('Nombre destinatario', 'BE', ForeignIdType::EuVatNumber, 'BE0404621642'))->lines([TaxLine::exempt(20000, ExemptionReason::IntraEuSupplies)]), 'intra-eu-goods'],
@@ -76,7 +76,7 @@ it('builds the service example of a corrective invoice for the difference, as an
     $data = InvoiceData::make('Rectificación por diferencias (cambio de base)')
         ->to(Recipient::spanish('A15022510', 'Nombre destinatario'))
         ->lines([TaxLine::vat(-50000, rate: 21)])
-        ->correcting(issuedInvoice('A-1', '2025-04-07'));
+        ->correcting(issuedInvoice('1', '2025-04-07'));
 
     // The example is an R4; the builder issues R1, the type for refunds and
     // discounts, and nothing else in the body differs.
