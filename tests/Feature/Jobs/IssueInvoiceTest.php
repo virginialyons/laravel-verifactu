@@ -206,7 +206,7 @@ it('gives a later send a new Idempotency-Key, so a fixed refusal is sent again',
 
 it('waits longer before each later attempt, up to five minutes: attempt :dataset', function (int $attempt, int $delay): void {
     $invoice = Invoice::factory()->create();
-    Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['message' => 'Error.'], 500)]);
+    Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['message' => 'Busy.', 'code' => 'service_busy'], 503)]);
 
     expect($this->secondsUntilRetry(new IssueInvoice($invoice), $attempt))->toBe($delay);
 })->with([
@@ -214,6 +214,7 @@ it('waits longer before each later attempt, up to five minutes: attempt :dataset
     [2, 30],
     [3, 60],
     [4, 300],
+    [5, 300],
     [9, 300],
 ]);
 

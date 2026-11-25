@@ -73,7 +73,7 @@ it('fails on a refusal', function (): void {
 
 it('waits longer before each later attempt when the service gives no Retry-After', function (): void {
     $invoice = Invoice::factory()->issued()->create();
-    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => Http::response(['message' => 'Error.'], 500)]);
+    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => Http::response(['message' => 'Busy.', 'code' => 'service_busy'], 503)]);
 
     expect($this->secondsUntilRetry(new RefreshInvoice($invoice), attempt: 3))->toBe(60);
 });
