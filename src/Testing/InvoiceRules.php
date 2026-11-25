@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Vlec\Verifactu\Testing;
 
 use BcMath\Number;
+use DateTimeImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Str;
 
 /**
@@ -19,6 +21,8 @@ use Illuminate\Support\Str;
  */
 class InvoiceRules
 {
+    public const string InvalidReferenceText = 'A reference\'s number is 1 to 60 printable characters, without " \' < = > or an XML entity such as &amp;.';
+
     public const string InvalidTaxId = 'The tax ID is not a valid Spanish tax ID (NIF, DNI or NIE): its format or check letter is wrong.';
 
     // @pest-mutate-ignore
@@ -93,6 +97,14 @@ class InvoiceRules
      * digits so that it fits an integer.
      */
     protected const string ReferencedNumber = '/^[1-9]\d{0,17}$/';
+
+    /**
+     * A reference's number or invoice_number as AEAT takes it: 1 to 60
+     * printable ASCII characters other than " ' < = >.
+     */
+    protected const string ReferenceText = '/^[\x20\x21\x23-\x26\x28-\x3B\x3F-\x7E]{1,60}$/';
+
+    protected const string XmlEntity = '/&(amp|lt|gt|quot|apos);/';
 
     /**
      * The first rule the body breaks, or null when it keeps them all. The
@@ -219,30 +231,67 @@ class InvoiceRules
             ->merge(Collection::make(Arr::wrap(Arr::get($body, 'replaced_invoices', [])))
                 ->mapWithKeys(fn (mixed $invoice, int $index): array => ["replaced_invoices.$index" => Arr::wrap($invoice)]));
 
-        $withoutDate = $references->search(fn (array $invoice): bool => ! is_string(Arr::get($invoice, 'issue_date')));
-
-        if ($withoutDate !== false) {
-            return self::error('field_required', "$withoutDate.issue_date", "The $withoutDate.issue_date field is required.");
-        }
-
-        // An invoice issued here goes by its number, one issued elsewhere by its invoice_number.
-        $wrongReference = $references->search(fn (array $invoice): bool => is_string(Arr::get($invoice, 'number')) === is_string(Arr::get($invoice, 'invoice_number')));
-
-        if ($wrongReference !== false) {
-            return self::error('invalid_referenced_invoice', $wrongReference, 'A corrected or replaced invoice is referenced wrongly: send number or invoice_number, not both, with its issue_date.');
-        }
-
-        $wrongNumber = $references->search(function (array $invoice): bool {
+        // The service's field rules come first, one at a time across every reference: each number, each invoice_number, each issue_date.
+        foreach ($references as $reference => $invoice) {
             $number = Arr::get($invoice, 'number');
 
-            return is_string($number) && ! Str::isMatch(self::ReferencedNumber, $number);
-        });
+            if (blank($number) && blank(Arr::get($invoice, 'invoice_number'))) {
+                return self::error('field_required', "$reference.number", "The $reference.number field is required when $reference.invoice_number is not present.");
+            }
 
-        if ($wrongNumber !== false) {
-            return self::error('invalid_referenced_invoice', "$wrongNumber.number", "The number is a whole number such as 42: the invoice's number within the series $series and the year of its issue_date.");
+            if (filled($number) && self::isInvalidReferenceText($number)) {
+                return self::error('invalid_referenced_invoice', "$reference.number", self::InvalidReferenceText);
+            }
+        }
+
+        $wrongInvoiceNumber = $references->search(fn (array $invoice): bool => filled(Arr::get($invoice, 'invoice_number')) && self::isInvalidReferenceText(Arr::get($invoice, 'invoice_number')));
+
+        if ($wrongInvoiceNumber !== false) {
+            return self::error('invalid_referenced_invoice', "$wrongInvoiceNumber.invoice_number", self::InvalidReferenceText);
+        }
+
+        foreach ($references as $reference => $invoice) {
+            $issueDate = Arr::get($invoice, 'issue_date');
+
+            if (blank($issueDate)) {
+                return self::error('field_required', "$reference.issue_date", "The $reference.issue_date field is required.");
+            }
+
+            if (self::isInvalidReferenceDate($issueDate)) {
+                return self::error('invalid_referenced_invoice', "$reference.issue_date", 'The issue_date is a date such as 2026-11-02, no later than today in Madrid.');
+            }
+        }
+
+        // Once those pass, each reference as a whole: by number (issued here) or by invoice_number (any invoice), never both.
+        foreach ($references as $reference => $invoice) {
+            $number = Arr::get($invoice, 'number');
+
+            if (filled($number) && filled(Arr::get($invoice, 'invoice_number'))) {
+                return self::error('invalid_referenced_invoice', $reference, 'A corrected or replaced invoice is referenced wrongly: send number or invoice_number, not both, with its issue_date.');
+            }
+
+            if (is_string($number) && ! Str::isMatch(self::ReferencedNumber, $number)) {
+                return self::error('invalid_referenced_invoice', "$reference.number", "The number is a whole number such as 42: the invoice's number within the series $series and the year of its issue_date.");
+            }
         }
 
         return null;
+    }
+
+    protected static function isInvalidReferenceText(mixed $text): bool
+    {
+        return ! is_string($text) || ! Str::isMatch(self::ReferenceText, $text) || Str::isMatch(self::XmlEntity, $text);
+    }
+
+    protected static function isInvalidReferenceDate(mixed $date): bool
+    {
+        if (! is_string($date)) {
+            return true;
+        }
+
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+
+        return $parsed === false || $parsed->format('Y-m-d') !== $date || $date > Date::now('Europe/Madrid')->toDateString();
     }
 
     /**

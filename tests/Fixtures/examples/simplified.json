@@ -1,5 +1,5 @@
 {
-    "slug": "simplified",
+    "scenario": "simplified",
     "title": "Simplified invoice",
     "description": "A simplified invoice (factura simplificada, F2): no recipient, at most 3,000.00.",
     "request": {

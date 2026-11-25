@@ -1,5 +1,5 @@
 {
-    "slug": "intra-eu-goods",
+    "scenario": "intra-eu-goods",
     "title": "Goods to a business in another EU country",
     "description": "An exempt intra-community supply of goods to a business in another EU country (entrega intracomunitaria de bienes), exemption E5 with the customer's VAT number.",
     "request": {

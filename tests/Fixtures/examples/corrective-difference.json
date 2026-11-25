@@ -1,5 +1,5 @@
 {
-    "slug": "corrective-difference",
+    "scenario": "corrective-difference",
     "title": "Corrective invoice for the difference",
     "description": "A corrective invoice for the difference (rectificativa por diferencias, R1\u2013R4 with correction method difference): its amounts are the change, here a lower base.",
     "request": {

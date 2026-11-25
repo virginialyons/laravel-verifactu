@@ -1,5 +1,5 @@
 {
-    "slug": "simplified-credit-note",
+    "scenario": "simplified-credit-note",
     "title": "Credit note for a simplified invoice",
     "description": "The first step of exchanging a simplified invoice for a full one (factura de canje): a negative simplified invoice (F2) that cancels it out.",
     "request": {

@@ -1,5 +1,5 @@
 {
-    "slug": "export-of-goods",
+    "scenario": "export-of-goods",
     "title": "Export of goods outside the EU",
     "description": "Goods shipped outside the EU, exempt under article 21 (exportación de bienes), exemption E2.",
     "request": {

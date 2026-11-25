@@ -1,5 +1,5 @@
 {
-    "slug": "standard",
+    "scenario": "standard",
     "title": "Standard invoice",
     "description": "A full invoice (factura completa, F1) to a Spanish business, with one line at 21% VAT.",
     "request": {

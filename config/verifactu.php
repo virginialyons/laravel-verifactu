@@ -28,8 +28,9 @@ return [
 
     /*
      * The columns of the invoice model's table that hold the service's
-     * answer. invoice_number is the number to print (series and number);
-     * number is the bare number a corrective invoice refers to.
+     * answer. invoice_number is the number to print: series, year and
+     * number (FACT-2026-00042); number is the number within the series
+     * and year, such as 42.
      */
     'columns' => [
         'uuid' => 'verifactu_uuid',

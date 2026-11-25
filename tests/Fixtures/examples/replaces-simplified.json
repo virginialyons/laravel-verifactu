@@ -1,5 +1,5 @@
 {
-    "slug": "replaces-simplified",
+    "scenario": "replaces-simplified",
     "title": "Full invoice replacing simplified ones",
     "description": "A full invoice that replaces earlier simplified invoices (factura sustitutiva de simplificadas, F3), listed in replaced_invoices.",
     "request": {

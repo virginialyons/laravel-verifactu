@@ -1,5 +1,5 @@
 {
-    "slug": "credit-note",
+    "scenario": "credit-note",
     "title": "Credit note",
     "description": "A refund to the customer as a full invoice with negative amounts (factura de abono).",
     "request": {

@@ -1,5 +1,5 @@
 {
-    "slug": "vat-exempt",
+    "scenario": "vat-exempt",
     "title": "VAT-exempt invoice",
     "description": "An invoice exempt from VAT (factura exenta), with exemption reason E1.",
     "request": {

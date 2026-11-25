@@ -21,10 +21,13 @@ use Vlec\Verifactu\Events\InvoiceRejected;
 use Vlec\Verifactu\Exceptions\VerifactuException;
 use Vlec\Verifactu\Facades\Verifactu;
 use Vlec\Verifactu\InvoiceBatchStatus;
+use Vlec\Verifactu\InvoiceData;
 use Vlec\Verifactu\InvoiceStatus;
 use Vlec\Verifactu\Models\InvoiceBatch;
+use Vlec\Verifactu\Recipient;
 use Vlec\Verifactu\Rules\KnownToAeat;
 use Vlec\Verifactu\TaxIdCheckResult;
+use Vlec\Verifactu\TaxLine;
 use Vlec\Verifactu\Testing\InvoiceRules;
 use Vlec\Verifactu\Testing\VerifactuFake;
 use Workbench\App\Models\Invoice;
@@ -853,7 +856,18 @@ it('refuses an invoice body as the service does: :dataset', function (array $bod
     'more than 12 lines' => [sale(['lines' => Collection::times(13, fn (): array => ['tax_base' => '1.00', 'exemption_reason' => 'E1'])->all(), 'total_amount' => '13.00']), 'invalid_lines', 'lines'],
     'a rate with three decimals' => [sale(['lines' => [['tax_base' => '100.00', 'operation_qualification' => 'S1', 'tax_rate' => '21.001', 'tax_amount' => '21.00']]]), 'invalid_tax_rate', 'lines.0.tax_rate'],
     'a corrected invoice without its date' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '7']]]]), 'field_required', 'correction.corrected_invoices.0.issue_date'],
-    'a corrected invoice without its number' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0'],
+    'a corrected invoice without its number' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['issue_date' => '2026-11-02']]]]), 'field_required', 'correction.corrected_invoices.0.number'],
+    'a corrected invoice with neither its number nor its date' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [[]]]]), 'field_required', 'correction.corrected_invoices.0.number'],
+    'a corrected invoice by a number with a leading zero and no date' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '07']]]]), 'field_required', 'correction.corrected_invoices.0.issue_date'],
+    'a corrected invoice by a number with a quote' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '7"', 'issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.number'],
+    'a replaced invoice by an invoice number with a quote' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['invoice_number' => "O'B-2025-1", 'issue_date' => '2025-12-29']]]), 'invalid_referenced_invoice', 'replaced_invoices.0.invoice_number'],
+    'a replaced invoice by an invoice number over 60 characters' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['invoice_number' => Str::repeat('A', 61), 'issue_date' => '2025-12-29']]]), 'invalid_referenced_invoice', 'replaced_invoices.0.invoice_number'],
+    'a replaced invoice by an invoice number with an XML entity' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['invoice_number' => 'A&amp;B-1', 'issue_date' => '2025-12-29']]]), 'invalid_referenced_invoice', 'replaced_invoices.0.invoice_number'],
+    'a replaced invoice by an invoice number, before one without a date' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['invoice_number' => 'T-1'], ['invoice_number' => 'T"2', 'issue_date' => '2025-12-29']]]), 'invalid_referenced_invoice', 'replaced_invoices.1.invoice_number'],
+    'a corrected invoice dated in the future' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['invoice_number' => 'T-1', 'issue_date' => '2099-01-01']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.issue_date'],
+    'a corrected invoice with a date not written as Y-m-d' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['invoice_number' => 'T-1', 'issue_date' => '02/11/2026']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.issue_date'],
+    'a corrected invoice with a date that does not exist' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['invoice_number' => 'T-1', 'issue_date' => '2026-02-30']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.issue_date'],
+    'a replaced invoice by both numbers, one with a leading zero' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['number' => '07', 'invoice_number' => 'FACT-2026-00007', 'issue_date' => '2026-11-02']]]), 'invalid_referenced_invoice', 'replaced_invoices.0'],
     'a replaced invoice by both numbers' => [sale(['invoice_type' => 'F3', 'replaced_invoices' => [['number' => '7', 'invoice_number' => 'FACT-2026-00007', 'issue_date' => '2026-11-02']]]), 'invalid_referenced_invoice', 'replaced_invoices.0'],
     'a corrected invoice by number 0' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '0', 'issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.number'],
     'a corrected invoice by a number with a leading zero' => [sale(['invoice_type' => 'R1', 'correction' => ['method' => 'difference', 'corrected_invoices' => [['number' => '07', 'issue_date' => '2026-11-02']]]]), 'invalid_referenced_invoice', 'correction.corrected_invoices.0.number'],
@@ -936,6 +950,53 @@ it('lists the simplified invoices an F3 replaces among its references', function
     ]);
 });
 
+it('issues an R1 correcting an invoice another system issued before the service, by its full number', function (): void {
+    Verifactu::fake();
+    $original = Invoice::factory()->create(['number' => 'OLD-2025-00118', 'issued_on' => '2025-12-30']);
+    $refund = Invoice::factory()->create(['exempt_cents' => 0, 'taxable_cents' => -1000, 'corrects_id' => $original->id]);
+
+    $refund->sendToVerifactu();
+
+    Verifactu::assertIssued($refund);
+    expect(Verifactu::listInvoices(['include' => 'references', 'filter' => ['invoice_type' => 'R1']])['data'])
+        ->toHaveCount(1)
+        ->{0}->references->toBe([['kind' => 'corrected', 'invoice_number' => 'OLD-2025-00118', 'issue_date' => '2025-12-30']]);
+});
+
+it('issues an F3 replacing a simplified invoice issued through it and one another system issued', function (): void {
+    Verifactu::fake();
+    $issuedHere = Invoice::factory()->simplified()->create();
+    $issuedElsewhere = Invoice::factory()->simplified()->create(['number' => 'T-2025-00031', 'issued_on' => '2025-12-29']);
+    $issuedHere->sendToVerifactu();
+
+    Verifactu::createInvoice(InvoiceData::make('Exchange')
+        ->to(Recipient::spanish('A15022510', 'Acme S.L.'))
+        ->lines([TaxLine::vat(2000, rate: 21)])
+        ->replacing($issuedHere->fresh(), $issuedElsewhere)
+        ->toArray());
+
+    expect(Verifactu::listInvoices(['include' => 'references', 'filter' => ['invoice_type' => 'F3']])['data'][0]['references'])->toBe([
+        ['kind' => 'replaced', 'invoice_number' => 'FACT-2026-00001', 'issue_date' => '2026-11-19'],
+        ['kind' => 'replaced', 'invoice_number' => 'T-2025-00031', 'issue_date' => '2025-12-29'],
+    ]);
+});
+
+it('refuses a correction of an invoice not issued yet, as the service does', function (): void {
+    Event::fake([InvoiceNotIssued::class]);
+    Verifactu::fake();
+    $original = Invoice::factory()->create();
+    $refund = Invoice::factory()->create(['exempt_cents' => 0, 'taxable_cents' => -1000, 'corrects_id' => $original->id]);
+
+    expect(fn () => $refund->sendToVerifactu())->toThrow(function (VerifactuException $exception): void {
+        expect($exception)
+            ->errorCode->toBe('field_required')
+            ->errors->toHaveKey('correction.corrected_invoices.0.number');
+    });
+
+    expect($refund->fresh()->verifactu_uuid)->toBeNull();
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($refund) && $event->errorCode === 'field_required');
+});
+
 it('names an invoice referenced by number with the series and the year of its issue_date', function (): void {
     Verifactu::fake();
     Verifactu::createInvoice(sale([
@@ -950,13 +1011,6 @@ it('names an invoice referenced by number with the series and the year of its is
 
     expect(Arr::pluck(Verifactu::listInvoices(['include' => 'references'])['data'][0]['references'], 'invoice_number'))
         ->toBe(['FACT-2025-00005', 'FACT-2026-123456']);
-});
-
-it('lists a reference by number whose issue_date is not a date without failing', function (): void {
-    Verifactu::fake();
-    Verifactu::createInvoice(sale(['invoice_type' => 'F3', 'replaced_invoices' => [['number' => '8', 'issue_date' => 'nope']]]));
-
-    expect(Verifactu::listInvoices(['include' => 'references'])['data'][0]['references'][0]['issue_date'])->toBe('nope');
 });
 
 it('refuses a reference whose number is not a whole number, naming the series', function (): void {

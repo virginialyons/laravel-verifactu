@@ -67,7 +67,8 @@ class InvoiceData implements Arrayable
     }
 
     /**
-     * A full invoice (F3) that replaces simplified invoices already issued.
+     * A full invoice (F3) that replaces simplified invoices already issued,
+     * through the service or by another system before it.
      */
     public function replacing(Model&VerifactuInvoice ...$simplifiedInvoices): static
     {
@@ -81,6 +82,8 @@ class InvoiceData implements Arrayable
     /**
      * A corrective invoice for the difference: its lines are the change,
      * negative to lower the original. R1, or R5 for a simplified original.
+     * The original may be one the service issued, or one another system
+     * issued before it, whose row holds its full number and issue date.
      */
     public function correcting(Model&VerifactuInvoice $original): static
     {
@@ -150,21 +153,21 @@ class InvoiceData implements Arrayable
     }
 
     /**
-     * An issued invoice as the API refers to it: its bare number and issue
-     * date. An invoice not issued yet has neither, and the service refuses
-     * the reference.
+     * An issued invoice as the API refers to it: its full number and issue
+     * date, which AEAT needs, whichever system issued it. An invoice not
+     * issued yet has neither, and the service refuses the reference.
      *
      * @return array<string, string>
      */
     protected function reference(Model&VerifactuInvoice $invoice): array
     {
-        $number = $invoice->getAttribute(config()->string('verifactu.columns.number'));
+        $invoiceNumber = $invoice->getAttribute(config()->string('verifactu.columns.invoice_number'));
         $issueDate = $invoice->getAttribute(config()->string('verifactu.columns.issue_date'));
 
         $reference = [];
 
-        if (is_string($number)) {
-            $reference['number'] = $number;
+        if (is_string($invoiceNumber)) {
+            $reference['invoice_number'] = $invoiceNumber;
         }
 
         if (is_string($issueDate)) {

@@ -1,5 +1,5 @@
 {
-    "slug": "several-vat-rates",
+    "scenario": "several-vat-rates",
     "title": "Invoice with several VAT rates",
     "description": "A full invoice (F1) with one tax line per VAT rate (factura con varios tipos de IVA).",
     "request": {

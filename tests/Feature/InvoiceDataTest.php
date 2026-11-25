@@ -20,9 +20,9 @@ use Workbench\App\Models\Invoice;
  *
  * @return array<string, mixed>
  */
-function serviceExample(string $slug): array
+function serviceExample(string $scenario): array
 {
-    $example = File::json(__DIR__."/../Fixtures/examples/$slug.json");
+    $example = File::json(__DIR__."/../Fixtures/examples/$scenario.json");
 
     return withTwoDecimals($example['request']['body']);
 }
@@ -58,19 +58,32 @@ function issuedInvoice(string $number, string $issueDate, bool $simplified = fal
 
 $business = Recipient::spanish('A15022510', 'Nombre destinatario');
 
-it('builds the body of the service example :dataset', function (Closure $build, string $slug): void {
-    expect($build()->toArray())->toEqual(serviceExample($slug));
+it('builds the body of the service example :dataset', function (Closure $build, string $scenario): void {
+    expect($build()->toArray())->toEqual(serviceExample($scenario));
 })->with([
     'standard' => [fn (): InvoiceData => InvoiceData::make('Factura normal')->to($business)->lines([TaxLine::vat(20000, rate: 21)]), 'standard'],
     'vat-exempt' => [fn (): InvoiceData => InvoiceData::make('Factura exenta de IVA')->to($business)->lines([TaxLine::exempt(20000)]), 'vat-exempt'],
     'several-vat-rates' => [fn (): InvoiceData => InvoiceData::make('Factura con varios IVAs')->to($business)->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'several-vat-rates'],
     'simplified' => [fn (): InvoiceData => InvoiceData::make('Factura simplificada')->simplified()->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'simplified'],
     'simplified-credit-note' => [fn (): InvoiceData => InvoiceData::make('Factura de canje, opción 1: abono de la simplificada')->simplified()->lines([TaxLine::vat(-20000, rate: 21)]), 'simplified-credit-note'],
-    'replaces-simplified' => [fn (): InvoiceData => InvoiceData::make('Factura de canje, opción 2: sustitutiva (F3)')->to($business)->lines([TaxLine::vat(20000, rate: 21)])->replacing(issuedInvoice('1', '2026-10-02', simplified: true)), 'replaces-simplified'],
     'credit-note' => [fn (): InvoiceData => InvoiceData::make('Factura de abono')->to($business)->lines([TaxLine::vat(-20000, rate: 21)]), 'credit-note'],
     'export-of-goods' => [fn (): InvoiceData => InvoiceData::make('Factura extracomunitaria - Exportación de bienes')->to(Recipient::foreign('Nombre destinatario', 'US', ForeignIdType::Passport, 'M76543210'))->lines([TaxLine::exempt(20000, ExemptionReason::Exports)]), 'export-of-goods'],
     'intra-eu-goods' => [fn (): InvoiceData => InvoiceData::make('Factura B2B intracomunitaria - Venta de bienes')->to(Recipient::foreign('Nombre destinatario', 'BE', ForeignIdType::EuVatNumber, 'BE0404621642'))->lines([TaxLine::exempt(20000, ExemptionReason::IntraEuSupplies)]), 'intra-eu-goods'],
 ]);
+
+it('builds the service example of an invoice replacing a simplified one, referring to it by its full number', function (): void {
+    $data = InvoiceData::make('Factura de canje, opción 2: sustitutiva (F3)')
+        ->to(Recipient::spanish('A15022510', 'Nombre destinatario'))
+        ->lines([TaxLine::vat(20000, rate: 21)])
+        ->replacing(issuedInvoice('1', '2026-10-02', simplified: true));
+
+    // The example refers by the number within the series and year; the
+    // builder always sends the full number, and nothing else differs.
+    expect($data->toArray())->toEqual([
+        ...serviceExample('replaces-simplified'),
+        'replaced_invoices' => [['invoice_number' => 'FACT-2026-00001', 'issue_date' => '2026-10-02']],
+    ]);
+});
 
 it('builds the service example of a corrective invoice for the difference, as an R1', function (): void {
     $data = InvoiceData::make('Rectificación por diferencias (cambio de base)')
@@ -78,9 +91,13 @@ it('builds the service example of a corrective invoice for the difference, as an
         ->lines([TaxLine::vat(-50000, rate: 21)])
         ->correcting(issuedInvoice('1', '2025-04-07'));
 
-    // The example is an R4; the builder issues R1, the type for refunds and
-    // discounts, and nothing else in the body differs.
-    expect($data->toArray())->toEqual([...serviceExample('corrective-difference'), 'invoice_type' => 'R1']);
+    // The example is an R4 that refers by the number within the series and
+    // year; the builder issues R1, the type for refunds and discounts, and
+    // sends the full number. Nothing else in the body differs.
+    $example = serviceExample('corrective-difference');
+    Arr::set($example, 'correction.corrected_invoices', [['invoice_number' => 'FACT-2025-00001', 'issue_date' => '2025-04-07']]);
+
+    expect($data->toArray())->toEqual([...$example, 'invoice_type' => 'R1']);
 });
 
 it('corrects a simplified invoice with an R5', function (): void {
@@ -90,7 +107,7 @@ it('corrects a simplified invoice with an R5', function (): void {
 
     expect($data->toArray())
         ->invoice_type->toBe('R5')
-        ->correction->toBe(['method' => 'difference', 'corrected_invoices' => [['number' => '7', 'issue_date' => '2026-11-02']]]);
+        ->correction->toBe(['method' => 'difference', 'corrected_invoices' => [['invoice_number' => 'FACT-2026-00007', 'issue_date' => '2026-11-02']]]);
 });
 
 it('reads the referenced invoice from the configured columns, with a Carbon date', function (): void {
@@ -100,7 +117,31 @@ it('reads the referenced invoice from the configured columns, with a Carbon date
 
     $data = InvoiceData::make('Refund')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(-1000, rate: 21)])->correcting($original);
 
-    expect($data->toArray()['correction']['corrected_invoices'])->toBe([['number' => '42', 'issue_date' => '2026-11-18']]);
+    expect($data->toArray()['correction']['corrected_invoices'])->toBe([['invoice_number' => 'FACT-2026-00042', 'issue_date' => '2026-11-18']]);
+});
+
+it('refers to an invoice another system issued before the service by the full number and date its row holds', function (): void {
+    $original = Invoice::factory()->make(['number' => 'OLD-2025-00118', 'issued_on' => '2025-12-30']);
+    $simplified = Invoice::factory()->simplified()->make(['number' => 'T-2025-00031', 'issued_on' => '2025-12-29']);
+
+    $correction = InvoiceData::make('Refund')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(-1000, rate: 21)])->correcting($original);
+    $replacement = InvoiceData::make('Exchange')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(1000, rate: 21)])->replacing($simplified, issuedInvoice('8', '2026-11-03', simplified: true));
+
+    expect($correction->toArray())
+        ->invoice_type->toBe('R1')
+        ->correction->corrected_invoices->toBe([['invoice_number' => 'OLD-2025-00118', 'issue_date' => '2025-12-30']])
+        ->and($replacement->toArray()['replaced_invoices'])->toBe([
+            ['invoice_number' => 'T-2025-00031', 'issue_date' => '2025-12-29'],
+            ['invoice_number' => 'FACT-2026-00008', 'issue_date' => '2026-11-03'],
+        ]);
+});
+
+it('corrects a simplified invoice another system issued with an R5', function (): void {
+    $original = Invoice::factory()->simplified()->make(['number' => 'T-2025-00031', 'issued_on' => '2025-12-29']);
+
+    $data = InvoiceData::make('Refund')->lines([TaxLine::vat(-1000, rate: 21)])->correcting($original);
+
+    expect($data->toArray())->invoice_type->toBe('R5');
 });
 
 it('leaves the number and date out of a reference to an invoice not issued yet, for the service to refuse', function (): void {

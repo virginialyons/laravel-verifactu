@@ -73,7 +73,7 @@ function installOnLegacyInvoices(PendingCommand $command, string $printedNumber 
         ])
         ->expectsQuestion('Which column holds its status at AEAT?', 'verifactu_status')
         ->expectsQuestion('Which column holds the number to print, such as FACT-2026-00042?', $printedNumber)
-        ->expectsQuestion('Which column holds the bare number a corrective invoice refers to, such as 42?', 'verifactu_number')
+        ->expectsQuestion('Which column holds the number within the series and year, such as 42?', 'verifactu_number')
         ->expectsQuestion('Which column holds the issue date?', 'verifactu_issue_date')
         ->expectsQuestion('Which column holds AEAT\'s verification URL?', 'verifactu_url')
         // qr_code is the table's own: nothing to create.
@@ -160,7 +160,7 @@ it('offers a column for one field only, and never the key or a timestamp', funct
         ->expectsQuestion('Which column holds the invoice\'s id on the service?', 'verifactu_uuid')
         ->expectsQuestion('Which column holds its status at AEAT?', 'verifactu_status')
         ->expectsQuestion('Which column holds the number to print, such as FACT-2026-00042?', 'number')
-        ->expectsChoice('Which column holds the bare number a corrective invoice refers to, such as 42?', 'verifactu_number', [
+        ->expectsChoice('Which column holds the number within the series and year, such as 42?', 'verifactu_number', [
             'verifactu_number' => 'Create verifactu_number',
             'customer_name' => 'customer_name',
             'hash' => 'hash',
@@ -225,7 +225,7 @@ it('writes no migration when the table has every column', function (): void {
         ->expectsQuestion('Which column holds the invoice\'s id on the service?', 'verifactu_uuid')
         ->expectsQuestion('Which column holds its status at AEAT?', 'verifactu_status')
         ->expectsQuestion('Which column holds the number to print, such as FACT-2026-00042?', 'verifactu_invoice_number')
-        ->expectsQuestion('Which column holds the bare number a corrective invoice refers to, such as 42?', 'verifactu_number')
+        ->expectsQuestion('Which column holds the number within the series and year, such as 42?', 'verifactu_number')
         ->expectsQuestion('Which column holds the issue date?', 'verifactu_issue_date')
         ->expectsQuestion('Which column holds AEAT\'s verification URL?', 'verifactu_url')
         ->expectsQuestion('Which column holds the QR code?', 'qr_code')
@@ -284,7 +284,7 @@ it('lists every old AEAT column, whatever the case of its name', function (): vo
         ->expectsQuestion('Which column holds the invoice\'s id on the service?', 'verifactu_uuid')
         ->expectsQuestion('Which column holds its status at AEAT?', 'verifactu_status')
         ->expectsQuestion('Which column holds the number to print, such as FACT-2026-00042?', 'verifactu_invoice_number')
-        ->expectsQuestion('Which column holds the bare number a corrective invoice refers to, such as 42?', 'verifactu_number')
+        ->expectsQuestion('Which column holds the number within the series and year, such as 42?', 'verifactu_number')
         ->expectsQuestion('Which column holds the issue date?', 'verifactu_issue_date')
         ->expectsQuestion('Which column holds AEAT\'s verification URL?', 'verifactu_url')
         ->expectsQuestion('Which column holds the QR code?', 'qr_code')
