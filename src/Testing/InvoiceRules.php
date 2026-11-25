@@ -21,7 +21,7 @@ use Illuminate\Support\Str;
  */
 class InvoiceRules
 {
-    public const string InvalidReferenceText = 'A reference\'s number is 1 to 60 printable characters, without " \' < = > or an XML entity such as &amp;.';
+    protected const string InvalidReferenceText = 'A reference\'s number is 1 to 60 printable characters, without " \' < = > or an XML entity such as &amp;.';
 
     public const string InvalidTaxId = 'The tax ID is not a valid Spanish tax ID (NIF, DNI or NIE): its format or check letter is wrong.';
 
@@ -244,10 +244,12 @@ class InvoiceRules
             }
         }
 
-        $wrongInvoiceNumber = $references->search(fn (array $invoice): bool => filled(Arr::get($invoice, 'invoice_number')) && self::isInvalidReferenceText(Arr::get($invoice, 'invoice_number')));
+        foreach ($references as $reference => $invoice) {
+            $invoiceNumber = Arr::get($invoice, 'invoice_number');
 
-        if ($wrongInvoiceNumber !== false) {
-            return self::error('invalid_referenced_invoice', "$wrongInvoiceNumber.invoice_number", self::InvalidReferenceText);
+            if (filled($invoiceNumber) && self::isInvalidReferenceText($invoiceNumber)) {
+                return self::error('invalid_referenced_invoice', "$reference.invoice_number", self::InvalidReferenceText);
+            }
         }
 
         foreach ($references as $reference => $invoice) {

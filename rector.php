@@ -16,10 +16,11 @@ use RectorLaravel\ValueObject\FuncCallToStaticCall;
 
 /*
  * Laravel's helpers over PHP's own functions, as in the service (owner, 2026-11-25). FuncCallToStaticCallRector keeps
- * the arguments as they are, so it only maps functions whose helper takes the same arguments in the same order with
- * the same meaning. tests/ArchTest.php forbids every other array_* function and the remaining functions with a Laravel
- * twin (explode, implode, in_array, dirname, file_get_contents, time, date…): their helpers reorder the arguments, also
- * pass the key, drop the encoding or return a collection, so they are written by hand.
+ * the arguments as they are, so it only maps functions whose helper takes the same arguments in the same order. The
+ * Str helpers count characters, not bytes (mb_*): where a byte count matters, such as a signed body's length, skip the
+ * rule for that file. tests/ArchTest.php forbids every other array_* function and the remaining functions with a
+ * Laravel twin (explode, implode, in_array, dirname, file_get_contents, time, date…): their helpers reorder the
+ * arguments, also pass the key, drop the encoding or return a collection, so they are written by hand.
  */
 $helpers = [
     new FuncCallToStaticCall('array_all', Arr::class, 'every'),

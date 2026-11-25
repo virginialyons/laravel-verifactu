@@ -63,11 +63,11 @@ class Client
         $url = config('verifactu.url');
 
         // Over plain HTTP the token would travel in clear.
-        throw_if(! is_string($url) || ! Str::startsWith($url, 'https://'), InvalidArgumentException::class, 'Set VERIFACTU_URL to the Verifactu service\'s HTTPS host, such as https://verifactu.example.com.');
+        throw_unless(is_string($url) && Str::startsWith($url, 'https://'), InvalidArgumentException::class, 'Set VERIFACTU_URL to the Verifactu service\'s HTTPS host, such as https://verifactu.example.com.');
 
         $token = config('verifactu.token');
 
-        throw_if(! is_string($token) || blank($token), InvalidArgumentException::class, 'Set VERIFACTU_TOKEN to the app\'s Verifactu token.');
+        throw_unless(is_string($token) && filled($token), InvalidArgumentException::class, 'Set VERIFACTU_TOKEN to the app\'s Verifactu token.');
 
         $url = Str::finish($url, '/');
 

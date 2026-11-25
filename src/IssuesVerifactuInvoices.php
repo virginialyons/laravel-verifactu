@@ -82,7 +82,7 @@ trait IssuesVerifactuInvoices
     {
         $key = $this->getKey();
 
-        throw_if(! is_int($key) && ! is_string($key), LogicException::class, 'Save the invoice before sending it to Verifactu.');
+        throw_unless(is_int($key) || is_string($key), LogicException::class, 'Save the invoice before sending it to Verifactu.');
 
         return "invoice:$key";
     }
