@@ -2,6 +2,18 @@
 
 All notable changes to `vlec/laravel-verifactu` are recorded here. Each release's notes are added when it is published on GitHub.
 
+## v0.2.1 - 2026-11-25
+
+`Verifactu::fake()` now answers tax-ID checks the way the Verifactu service does in each environment.
+
+- **Tax-ID checks in Test:** with a `vf_test_` token (the fake's own, when none is set), a tax-ID check answers `not_checked` and no invoice is refused with `recipient_not_identified`, as the service does in Test, where AEAT has no checker (a malformed tax ID is still refused with `invalid_tax_id`). With a `vf_prod_` token it answers `identified`, as before.
+- **`taxIdCheck()` works with any token:** `Verifactu::fake()->taxIdCheck(TaxIdCheckResult::NotIdentified)` still makes checks, and issuing to a Spanish tax ID, fail with `recipient_not_identified`, so your tests can try a refused customer without a Live token.
+- **Docs:** the README names the two differences between Test and Live (Test checks no tax ID; Live has its own numbering, and an administrator sets its next number when you carry on from another system), and says the install wizard asks for all seven columns.
+
+If a test expected `identified` from the fake with a Test token, expect `not_checked`, or call `taxIdCheck(TaxIdCheckResult::Identified)` first.
+
+There is no new migration or config key.
+
 ## v0.2.0 - 2026-11-25
 
 Corrective and replacing invoices refer to any original by its full number, including an invoice issued from another system before the service. Read [Upgrading from 0.1 to 0.2](README.md#from-01-to-02) before deploying: let the queue run dry first.
@@ -56,7 +68,6 @@ The token decides the environment: a `vf_test_` token issues in Test, a `vf_prod
 ```bash
 composer require vlec/laravel-verifactu:^0.1
 php artisan verifactu:install
+
 ```
-
 Until `1.0.0`, a minor version may change the public API. Read the [README](https://github.com/virginialyons/laravel-verifactu#readme) for the full guide.
-
