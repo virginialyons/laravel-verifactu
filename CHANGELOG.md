@@ -2,7 +2,7 @@
 
 All notable changes to `vlec/laravel-verifactu` are recorded here. Each release's notes are added when it is published on GitHub.
 
-## Unreleased
+## v0.2.0 - 2026-11-25
 
 Corrective and replacing invoices refer to any original by its full number, including an invoice issued from another system before the service. Read [Upgrading from 0.1 to 0.2](README.md#from-01-to-02) before deploying: let the queue run dry first.
 
