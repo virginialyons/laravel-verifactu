@@ -19,12 +19,13 @@ This package is built for the company's own apps.
 - [Calling the API directly](#calling-the-api-directly)
 - [Testing](#testing)
 - [Commands](#commands)
+- [AI agents](#ai-agents)
 - [Upgrading](#upgrading)
 
 ## Requirements
 
 - PHP 8.4+ with `ext-bcmath`
-- Laravel 13
+- Laravel 13.44+
 - A queue worker on a real queue connection, such as `database` or `redis`
 - An app on the Verifactu service: its API token and webhook signing secret
 
@@ -84,7 +85,7 @@ The columns, each of which you may rename:
 | `uuid`             | `verifactu_uuid`            | The invoice's id on the service                               |
 | `status`           | `verifactu_status`          | Its status at AEAT, cast to `Vlec\Verifactu\InvoiceStatus`    |
 | `invoice_number`   | `verifactu_invoice_number`  | The number to print, such as `FACT-2026-00042`                |
-| `number`           | `verifactu_number`          | The bare number a corrective invoice refers to, such as `42`  |
+| `number`           | `verifactu_number`          | The number within the series and year, such as `42`           |
 | `issue_date`       | `verifactu_issue_date`      | The issue date, cast to a date unless the model casts it      |
 | `verification_url` | `verifactu_url`             | AEAT's verification URL                                       |
 | `qr_code`          | `qr_code`                   | The QR code, a base64 PNG without a `data:` prefix            |
@@ -109,7 +110,7 @@ class Invoice extends Model implements VerifactuInvoice
 
     public function toVerifactu(): InvoiceData
     {
-        return InvoiceData::make("Order {$this->id}")
+        return InvoiceData::make("Order $this->id")
             ->to(Recipient::spanish($this->customer_tax_id, $this->customer_name))
             ->lines([TaxLine::vat($this->subtotal_cents, rate: 21)]);
     }
@@ -135,24 +136,17 @@ TaxLine::exempt(20000, ExemptionReason::Exports);
 
 The reasons are `InternalOperations` (`E1`), `Exports` (`E2`), `ExportLikeOperations` (`E3`), `CustomsAndTaxWarehouses` (`E4`), `IntraEuSupplies` (`E5`) and `Other` (`E6`).
 
-An invoice may mix VAT and exempt lines. An order with an exempt course and a book at 21% VAT:
+An invoice may mix VAT and exempt lines. An order with an exempt course and a book at 21% VAT, either of which may be zero:
 
 ```php
 public function toVerifactu(): InvoiceData
 {
-    $lines = [];
-
-    if ($this->exempt_cents !== 0) {
-        $lines[] = TaxLine::exempt($this->exempt_cents);
-    }
-
-    if ($this->taxable_cents !== 0) {
-        $lines[] = TaxLine::vat($this->taxable_cents, rate: 21);
-    }
-
-    return InvoiceData::make("Order {$this->id}")
+    return InvoiceData::make("Order $this->id")
         ->to(Recipient::spanish($this->customer_tax_id, $this->customer_name))
-        ->lines($lines);
+        ->lines(collect([
+            TaxLine::exempt($this->exempt_cents),
+            TaxLine::vat($this->taxable_cents, rate: 21),
+        ])->reject(fn (TaxLine $line): bool => $line->baseCents === 0));
 }
 
 protected function casts(): array
@@ -164,11 +158,11 @@ protected function casts(): array
 }
 ```
 
-Cast the cent columns to `integer`, so a `0` read from the database or a request is the integer `0`.
+`lines()` takes an array or a collection. `reject()` drops a line whose amount is zero, so an order with only a course or only a book sends one line. Cast the cent columns to `integer`, so a `0` read from the database or a request is the integer `0`.
 
 Pass your own items as they are: lines with the same VAT rate, or the same exemption reason, become one line with their bases added up. The tax is worked out once per grouped line, rounded half away from zero to the cent (-52.5 cents is -53). The service takes 1 to 12 grouped lines.
 
-`taxLines()` and `totalCents()` give back exactly what AEAT receives, to print on the invoice:
+`taxLines()` and `totalCents()` give back exactly what AEAT receives, to print on the invoice. `taxLines()` is a collection of the grouped `TaxLine`s:
 
 ```php
 $data = $invoice->toVerifactu();
@@ -215,7 +209,9 @@ InvoiceData::make('Refund of 10.00 on order 42')
     ->correcting($original);
 ```
 
-A corrective invoice is a new invoice: a new row of your invoice model whose `toVerifactu()` calls `correcting()`. Its lines are the change, negative to lower the original. `replacing()` and `correcting()` take your issued models and read their number and issue date.
+A corrective invoice is a new invoice: a new row of your invoice model whose `toVerifactu()` calls `correcting()`. Its lines are the change, negative to lower the original.
+
+`replacing()` and `correcting()` take your invoice models and refer to each by its full number and issue date, read from the columns of the `invoice_number` and `issue_date` fields (`verifactu_invoice_number` and `verifactu_issue_date` by default). So they also take an invoice your app issued from another system before the service, as long as its row holds its number (`OLD-2025-00118`) and date in those columns. Its `toVerifactu()` must still describe it, because `correcting()` reads from it whether the original was simplified (R5) or not (R1). Never send that row itself: it would be issued as a new invoice.
 
 The package doesn't judge the invoice: the service does. It sends what `toVerifactu()` describes, and whatever the service refuses comes back with the service's error code: an invoice with no lines or more than 12 (`invalid_lines`), a recipient on a simplified invoice (`recipient_not_allowed`), a reference to an original not issued yet… Sent with `sendToVerifactu()`, that is `InvoiceNotIssued` with the code; from a direct call, a `VerifactuException`.
 
@@ -268,7 +264,7 @@ $invoice->cancelOnVerifactu();
 
 `correctOnVerifactu()` sends AEAT a new record of the same invoice, which keeps its number, date and amounts. It fixes the description after a rejection or an acceptance with errors. Without a description it sends the same record again, after a technical rejection. Wrong amounts, a wrong rate or the wrong customer need a [corrective invoice](#other-kinds-of-invoice) instead.
 
-`cancelOnVerifactu()` tells AEAT the invoice should never have been issued, such as a duplicate. A refunded sale is not cancelled: it needs a corrective invoice.
+`cancelOnVerifactu()` tells AEAT the invoice should never have been issued, such as a duplicate. Only an invoice issued through the service can be cancelled. A refunded sale is not cancelled: it needs a corrective invoice.
 
 Both call the service at once, not from a queue, and store the status `pending`. AEAT's answer arrives by webhook. Call them after your database transaction commits: a call inside a transaction that rolls back would leave the service changed and your app not.
 
@@ -441,9 +437,45 @@ Verifactu::assertIssued($invoice, fn (array $body): bool => $body['total_amount'
 
 `php artisan about` shows the service's URL, the environment, the invoice model and the webhook URL. It never shows the token or the secret.
 
+## AI agents
+
+The package ships a [Laravel Boost](https://laravel.com/docs/boost) guideline and a skill, `laravel-verifactu-development`, that teach your app's AI agent the invoice model, tax lines, references, events and fake. Install Boost and run its installer. When it asks which third-party AI guidelines and skills to install, pick `vlec/laravel-verifactu`:
+
+```bash
+composer require laravel/boost --dev
+php artisan boost:install
+```
+
+After upgrading the package, refresh them:
+
+```bash
+php artisan boost:update
+```
+
+If Boost was installed before the package, `boost:update` finds the package and offers to add its guideline and skill. Run it yourself: from Composer's scripts it doesn't ask.
+
 ## Upgrading
 
-Until `1.0.0`, a minor version (`0.1` → `0.2`) may change the public API: require `^0.1` and read the [changelog](CHANGELOG.md) before moving up. When a release adds a migration or a config key, its changelog entry says how to add it. Don't publish `verifactu-migrations` again: publishing renames the migration to the time it runs, so it would add a second copy of the batches table.
+Until `1.0.0`, a minor version (`0.2` → `0.3`) may change the public API: require `^0.2` and read the [changelog](CHANGELOG.md) before moving up. When a release adds a migration or a config key, its changelog entry says how to add it. Don't publish `verifactu-migrations` again: publishing renames the migration to the time it runs, so it would add a second copy of the batches table.
+
+### From 0.1 to 0.2
+
+0.2 adds no migration and no config key.
+
+1. **Let the queue run dry first.** A job queued under 0.1 carries no backoff, and its retries keep it. After the upgrade, it would retry a failing service at once, again and again, for up to 24 hours. So before you deploy 0.2:
+    - Stop sending invoices, and pause the scheduled `verifactu:refresh-pending`. Webhooks still queue `RefreshInvoice` and `ApplyInvoiceBatch`, so keep the gap short.
+    - Let your workers finish the package's jobs (`IssueInvoice`, `SendInvoiceBatch`, `RefreshInvoice`, `ApplyInvoiceBatch`), including the ones released to wait for a retry. Do it before `php artisan down`: in maintenance mode, workers take no jobs unless they run with `--force`.
+    - Retry or delete the package's failed jobs before the upgrade. A 0.1 job retried with `queue:retry` afterwards keeps its old payload.
+2. **Laravel 13.44 or later.** Upgrade Laravel, then require the package:
+
+    ```bash
+    composer require vlec/laravel-verifactu:^0.2
+    ```
+
+3. **`taxLines()` returns a collection** of `TaxLine`, not an array. `foreach` and `count()` work as before. Where you used an array function on it, use the collection's own method, such as `->sum(...)` or `->first()`, or `->all()` for the array. Check emptiness with `->isEmpty()`: `=== []` and `empty()` are now always false.
+4. **The jobs retry through Laravel's `$backoff`.** The jobs' `$releaseDelays` property is gone. They wait 10, 30, 60, then 300 seconds, as before, from Laravel's `$backoff` property. A `Retry-After` from the service still wins.
+5. **Corrective and replacing invoices refer to the original by its full number.** `correcting()` and `replacing()` send the original's `invoice_number` with its `issue_date`, never its `number`, so they also take an invoice from another system (see [Other kinds of invoice](#other-kinds-of-invoice)). Nothing changes for an invoice issued through the service. A test that checks the reference in the request body should expect `invoice_number`.
+6. **Refresh the AI agent's guideline and skill** with `php artisan boost:update`, if you use [Laravel Boost](#ai-agents).
 
 ## License
 

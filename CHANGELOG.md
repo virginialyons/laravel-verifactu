@@ -2,6 +2,19 @@
 
 All notable changes to `vlec/laravel-verifactu` are recorded here. Each release's notes are added when it is published on GitHub.
 
+## Unreleased
+
+Corrective and replacing invoices refer to any original by its full number, including an invoice issued from another system before the service. Read [Upgrading from 0.1 to 0.2](README.md#from-01-to-02) before deploying: let the queue run dry first.
+
+- **References by full number:** `correcting()` and `replacing()` send the original's `invoice_number` and `issue_date`, never its `number`. They also take an invoice the app issued from another system before the service, when its `invoice_number` and `issue_date` columns hold them. Cancelling stays limited to invoices issued through the service.
+- **`taxLines()` returns a collection** of `TaxLine`, not an array.
+- **Retries through Laravel's backoff:** the jobs wait 10, 30, 60, then 300 seconds through Laravel's `$backoff` property, as before. The `$releaseDelays` property is gone. A `Retry-After` from the service still wins.
+- **The fake checks references as the service does:** a reference with neither `number` nor `invoice_number` (an original not issued yet) is refused with `422` `field_required` on its `number`, and its `invoice_number` and `issue_date` get the service's field rules.
+- **AI agents:** the README shows how to install the package's Laravel Boost guideline and skill with `boost:install`, and refresh them with `boost:update`. Both describe 0.2.
+- **Requirements:** Laravel 13.44 or later.
+
+There is no new migration or config key.
+
 ## v0.1.1 - 2026-11-24
 
 `Verifactu::fake()` now numbers invoices the way the Verifactu service does.
