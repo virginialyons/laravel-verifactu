@@ -16,6 +16,7 @@ Use this skill when a Laravel app issues invoices through the Verifactu service 
 ## Primary Goal
 
 - Keep the app's call sites short (`$invoice->sendToVerifactu()`) and let the package handle the HTTP, retries, idempotency, webhooks and stored columns.
+- Write the app's code around the package the way the package is written: Laravel's helpers and built-in solutions (`Str`, `Arr`, collections, `throw_if`, `dispatch(new …)`) over plain PHP functions and hand-rolled code.
 
 ## Workflow
 
@@ -32,10 +33,12 @@ php artisan migrate
 - The columns (`config('verifactu.columns')`) must exist before the first send. The status column is cast to `Vlec\Verifactu\InvoiceStatus`.
 - The jobs need a real queue (`database`, `redis`) outside tests.
 - Schedule the catch-up for missed webhooks in `routes/console.php`: `Schedule::command('verifactu:refresh-pending')->hourly();`
+- After `composer require vlec/laravel-verifactu:^X`, read the new version's notes under "Upgrading" in `vendor/vlec/laravel-verifactu/README.md` before deploying, then refresh this skill with `php artisan boost:update`.
 
 ### 2. Write the model
 
 ```php
+use Illuminate\Database\Eloquent\Model;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
 use Vlec\Verifactu\InvoiceData;
 use Vlec\Verifactu\IssuesVerifactuInvoices;
@@ -48,34 +51,32 @@ class Invoice extends Model implements VerifactuInvoice
 
     public function toVerifactu(): InvoiceData
     {
-        $lines = [];
-
-        if ($this->exempt_cents !== 0) {
-            $lines[] = TaxLine::exempt($this->exempt_cents);
-        }
-
-        if ($this->taxable_cents !== 0) {
-            $lines[] = TaxLine::vat($this->taxable_cents, rate: 21);
-        }
-
-        return InvoiceData::make("Order {$this->id}")
+        return InvoiceData::make("Order $this->id")
             ->to(Recipient::spanish($this->customer_tax_id, $this->customer_name))
-            ->lines($lines);
+            ->lines(collect([
+                TaxLine::exempt($this->exempt_cents),
+                TaxLine::vat($this->taxable_cents, rate: 21),
+            ])->reject(fn (TaxLine $line): bool => $line->baseCents === 0));
     }
 
     protected function casts(): array
     {
-        return ['exempt_cents' => 'integer', 'taxable_cents' => 'integer'];
+        return [
+            'exempt_cents' => 'integer',
+            'taxable_cents' => 'integer',
+        ];
     }
 }
 ```
 
+- `lines()` takes an array or a collection: build optional lines as a collection and `reject()` the empty ones, never with `$lines[] =`.
 - Amounts are whole cents, cast to `integer`. `TaxLine::vat($cents, rate: 21)` (rate in percent, an `int` or a numeric string); `TaxLine::exempt($cents)` uses `config('verifactu.exemption_reason')` (`E1`), or pass an `ExemptionReason` (`Exports`, `IntraEuSupplies`…).
 - Pass the app's items as they are: same-rate lines are grouped and the tax is worked out once per group, rounded half away from zero.
 - The package doesn't validate the invoice: the service does. Its refusals (`invalid_lines`, `recipient_not_allowed`, `invalid_referenced_invoice`…) arrive as `InvoiceNotIssued` with the service's `errorCode`, one invoice at a time, also in a batch. Don't add checks that copy the service's rules.
 - `Recipient::spanish($taxId, $name)` or `Recipient::foreign($name, $countryCode, ForeignIdType::Passport, $id)`.
 - `->simplified()` (F2, no recipient), `->replacing(...$simplifiedInvoices)` (F3), `->correcting($original)` (a corrective invoice for the difference, R1 or R5, with negative lines to lower the original; a new row of the model).
-- `$invoice->toVerifactu()->taxLines()` and `->totalCents()` give what AEAT receives, for printing.
+- `replacing()` and `correcting()` refer to each original by its full number and issue date, read from the columns mapped as `invoice_number` and `issue_date` in `config('verifactu.columns')`. So they also take an invoice the app issued from another system before the service, once its row holds those two values.
+- `$invoice->toVerifactu()->taxLines()` (a collection of `TaxLine`) and `->totalCents()` give what AEAT receives, for printing.
 
 ### 3. Issue, fix and cancel
 
@@ -85,7 +86,7 @@ use Vlec\Verifactu\Facades\Verifactu;
 $invoice->sendToVerifactu();          // queued, after commit
 Verifactu::sendBatch($invoices);      // one batch, queued
 $invoice->correctOnVerifactu('Spanish course, B2'); // new record: description only, or none to resend
-$invoice->cancelOnVerifactu();        // issued by mistake; a refund is a corrective invoice instead
+$invoice->cancelOnVerifactu();        // issued by mistake through the service; a refund is a corrective invoice instead
 ```
 
 - `correctOnVerifactu()` and `cancelOnVerifactu()` call the service directly: call them after the transaction commits, and catch `Vlec\Verifactu\Exceptions\VerifactuException`. Branch on `$exception->errorCode` (`invoice_awaiting_aeat`, `invoice_cancelled`…) and show `getMessage()`.
@@ -97,7 +98,7 @@ Events in `Vlec\Verifactu\Events`, each with `$event->invoice`:
 
 - `InvoiceIssued`: number, date and QR code are stored. Send the PDF here.
 - `InvoiceNotIssued` (`errorCode`, `message`): the service refused it, or never answered (null `errorCode`); nothing was issued.
-- `InvoiceAccepted`, `InvoiceAcceptedWithErrors` and `InvoiceRejected` (`errorCode`, `errorMessage` from AEAT), `InvoiceCancelled`.
+- `InvoiceAccepted` and `InvoiceCancelled`; `InvoiceAcceptedWithErrors` and `InvoiceRejected` also carry `errorCode` and `errorMessage` from AEAT.
 - `InvoiceBatchCompleted` (`batch`, `total`, `succeeded`, `failed`).
 
 Make listeners `ShouldQueue` and safe to run twice. A status event fires only when the stored status changes.
@@ -148,12 +149,19 @@ expect($invoice->fresh()->verifactu_status)->toBe(InvoiceStatus::Accepted);
 
 - "Send the invoice when the order is paid": in the payment handler's transaction, save the invoice row and call `$invoice->sendToVerifactu()`; listen to `InvoiceIssued` to email the PDF.
 - "Refund part of an order": create a new invoice row whose `toVerifactu()` returns negative lines with `->correcting($original)`, then `sendToVerifactu()` it.
+- "Refund an invoice issued before the app used the service":
+    - Keep the old invoice as a row of the model, with its number (such as `OLD-2025-00118`) and issue date in the columns mapped as `invoice_number` and `issue_date` (`verifactu_invoice_number` and `verifactu_issue_date` by default).
+    - Its `toVerifactu()` must still call `->simplified()` if it was simplified: `correcting()` picks R5 or R1 from it.
+    - Never send the old row, alone, in a batch or in a query for unsent invoices: it has no uuid, so it would be issued as a new invoice.
+    - Create a new row whose `toVerifactu()` returns the negative lines with `->correcting($oldInvoice)`, and `sendToVerifactu()` it.
+    - The old invoice can't be cancelled: only invoices issued through the service can.
 - "Show AEAT's rejection to the accounts team": listen to `InvoiceRejected` and notify with `$event->errorCode` and `$event->errorMessage`.
 
 ## Anti-patterns
 
 - Floats or decimal strings for money; computing VAT in the app.
 - Writing `external_reference`, `Idempotency-Key`s, HTTP calls or webhook handling by hand.
+- Calling `Verifactu::createInvoice()` by hand to correct an invoice from another system: a new row whose `toVerifactu()` calls `->correcting($oldInvoice)` does it.
 - Editing or deleting an issued invoice's row, or cancelling a refunded sale (issue a corrective invoice).
 - Calling `correctOnVerifactu()` or `cancelOnVerifactu()` inside a transaction that may roll back.
 - Branching on an exception's message; logging the token or the webhook secret.
