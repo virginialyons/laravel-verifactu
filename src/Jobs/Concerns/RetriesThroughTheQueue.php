@@ -23,7 +23,7 @@ trait RetriesThroughTheQueue
      *
      * @var list<int>
      */
-    public array $releaseDelays = [10, 30, 60, 300];
+    public array $backoff = [10, 30, 60, 300];
 
     /**
      * The service replays an Idempotency-Key for 24 hours.
@@ -35,20 +35,19 @@ trait RetriesThroughTheQueue
 
     /**
      * Releases the job after an answer worth trying again, such as a 503,
-     * and rethrows any other, which fails the job.
+     * for the service's Retry-After or else the backoff, and rethrows any
+     * other answer, which fails the job.
      */
     protected function releaseOrFail(VerifactuException $exception): void
     {
         throw_if($exception->isNotRetryable(), $exception);
 
-        $this->release($exception->retryAfter ?? $this->releaseDelay());
-    }
+        if ($exception->retryAfter !== null) {
+            $this->release($exception->retryAfter);
 
-    /**
-     * The wait before the next attempt, longer after each one.
-     */
-    protected function releaseDelay(): int
-    {
-        return $this->releaseDelays[min($this->attempts(), count($this->releaseDelays)) - 1];
+            return;
+        }
+
+        $this->releaseUsingBackoff();
     }
 }

@@ -93,11 +93,14 @@ it('is released to store the batch on the retry when the database fails after th
     Http::fake(['verifactu.test/api/v1/invoice-batches' => Http::response(['data' => serviceBatch()], 202)]);
     Schema::rename('verifactu_invoice_batches', 'batches_away');
 
-    $job = sendBatchJob($invoices)->assertReleased(10);
+    $job = new SendInvoiceBatch($invoices);
+
+    expect($this->secondsUntilRetry($job))->toBe(10);
     Exceptions::assertReported(QueryException::class);
 
     Schema::rename('batches_away', 'verifactu_invoice_batches');
-    $job->withFakeQueueInteractions()->handle(resolve(Client::class));
+    $this->travel(10)->seconds();
+    $this->artisan('queue:work', ['--once' => true])->assertSuccessful();
 
     expect(InvoiceBatch::sole())->uuid->toBe(serviceBatch()['uuid'])->status->toBe(InvoiceBatchStatus::Queued);
     expect(Http::recorded()->map(fn (array $pair): array => $pair[0]->header('Idempotency-Key'))->unique()->all())->toBe([[$job->idempotencyKey]]);

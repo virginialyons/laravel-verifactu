@@ -95,7 +95,7 @@ it('releases the job after a :dataset, with one request per attempt', function (
     $invoice = Invoice::factory()->create();
     Http::fake(['verifactu.test/api/v1/invoices' => $failure(Http::sequence())]);
 
-    issueJob($invoice)->assertReleased($delay);
+    expect($this->secondsUntilRetry(new IssueInvoice($invoice)))->toBe($delay);
 
     Http::assertSentCount(1);
     expect($invoice->fresh()->verifactu_uuid)->toBeNull();
@@ -171,7 +171,7 @@ it('is released to store the invoice on the retry when the database fails after 
     Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['data' => serviceInvoice()], 201)]);
     Schema::table('invoices', fn ($table) => $table->renameColumn('number', 'printed_number'));
 
-    issueJob($invoice)->assertReleased(10)->assertNotFailed();
+    expect($this->secondsUntilRetry(new IssueInvoice($invoice)))->toBe(10);
 
     Exceptions::assertReported(QueryException::class);
     Event::assertNotDispatched(InvoiceIssued::class);
@@ -207,12 +207,8 @@ it('gives a later send a new Idempotency-Key, so a fixed refusal is sent again',
 it('waits longer before each later attempt, up to five minutes: attempt :dataset', function (int $attempt, int $delay): void {
     $invoice = Invoice::factory()->create();
     Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['message' => 'Error.'], 500)]);
-    $job = new IssueInvoice($invoice)->withFakeQueueInteractions();
-    $job->job->attempts = $attempt;
 
-    $job->handle(resolve(Client::class));
-
-    $job->assertReleased($delay);
+    expect($this->secondsUntilRetry(new IssueInvoice($invoice), $attempt))->toBe($delay);
 })->with([
     [1, 10],
     [2, 30],

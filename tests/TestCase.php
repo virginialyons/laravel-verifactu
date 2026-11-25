@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Vlec\Verifactu\Tests;
 
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Orchestra\Testbench\Concerns\WithWorkbench;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -30,6 +32,24 @@ abstract class TestCase extends Orchestra
         parent::setUp();
 
         Http::preventStrayRequests();
+    }
+
+    /**
+     * Runs the job's given attempt through the database queue, with time
+     * frozen, and gives back the seconds it then waits for the next one.
+     */
+    protected function secondsUntilRetry(ShouldQueue $job, int $attempt = 1): int
+    {
+        config(['queue.default' => 'database']);
+        $this->freezeSecond();
+
+        dispatch($job);
+        // The worker counts the attempt it reserves.
+        DB::table('jobs')->update(['attempts' => $attempt - 1]);
+
+        $this->artisan('queue:work', ['--once' => true])->assertSuccessful();
+
+        return DB::table('jobs')->sole()->available_at - now()->getTimestamp();
     }
 
     protected function defineEnvironment($app): void

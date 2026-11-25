@@ -83,7 +83,7 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
             // The service issued it: the retry's same key replays the answer, to store it then.
             report($exception);
 
-            $this->release($this->releaseDelay());
+            $this->releaseUsingBackoff();
 
             return;
         }

@@ -74,12 +74,8 @@ it('fails on a refusal', function (): void {
 it('waits longer before each later attempt when the service gives no Retry-After', function (): void {
     $invoice = Invoice::factory()->issued()->create();
     Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => Http::response(['message' => 'Error.'], 500)]);
-    $job = new RefreshInvoice($invoice)->withFakeQueueInteractions();
-    $job->job->attempts = 3;
 
-    $job->handle(resolve(Client::class));
-
-    $job->assertReleased(60);
+    expect($this->secondsUntilRetry(new RefreshInvoice($invoice), attempt: 3))->toBe(60);
 });
 
 it('waits five seconds for a read of the same invoice running on another worker', function (): void {

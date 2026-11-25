@@ -63,7 +63,7 @@ class SendInvoiceBatch implements ShouldQueue, ShouldQueueAfterCommit
             // The service took the batch: the retry's same key replays its answer, to store it then.
             report($exception);
 
-            $this->release($this->releaseDelay());
+            $this->releaseUsingBackoff();
         }
     }
 
