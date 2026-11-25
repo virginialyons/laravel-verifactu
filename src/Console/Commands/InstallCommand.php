@@ -43,8 +43,8 @@ class InstallCommand extends Command
 
         $misplaced = $this->configKeysNotOnTheirOwnLine();
 
-        if ($misplaced !== []) {
-            $this->components->error('config/verifactu.php must keep each of these keys on its own line, as published: '.Collection::make($misplaced)->join(', '));
+        if ($misplaced->isNotEmpty()) {
+            $this->components->error('config/verifactu.php must keep each of these keys on its own line, as published: '.$misplaced->join(', '));
 
             return self::FAILURE;
         }
@@ -56,7 +56,7 @@ class InstallCommand extends Command
         $model = $this->askForModel();
 
         if (! is_subclass_of($model, Model::class)) {
-            $this->components->error("{$model} is not an Eloquent model.");
+            $this->components->error("$model is not an Eloquent model.");
 
             return self::FAILURE;
         }
@@ -89,9 +89,9 @@ class InstallCommand extends Command
     /**
      * The keys the wizard rewrites, which an earlier edit may have moved off their own line.
      *
-     * @return array<int, string>
+     * @return Collection<int, string>
      */
-    protected function configKeysNotOnTheirOwnLine(): array
+    protected function configKeysNotOnTheirOwnLine(): Collection
     {
         $config = $this->files->get(config_path('verifactu.php'));
 
@@ -100,8 +100,7 @@ class InstallCommand extends Command
 
         return Collection::make($columns)->keys()->prepend('model')
             ->reject(fn (string $key): bool => Str::isMatch($this->configLine($key), $config))
-            ->values()
-            ->all();
+            ->values();
     }
 
     /**
@@ -110,7 +109,7 @@ class InstallCommand extends Command
      */
     protected function configLine(string $key): string
     {
-        return "/^\s*\K'{$key}' => .*,$/m";
+        return "/^\s*\K'$key' => .*,$/m";
     }
 
     /**
@@ -149,11 +148,11 @@ class InstallCommand extends Command
             return $model;
         }
 
-        if (is_dir(app_path('Models'))) {
-            return "{$this->laravel->getNamespace()}Models\\{$model}";
+        if ($this->files->isDirectory(app_path('Models'))) {
+            return "{$this->laravel->getNamespace()}Models\\$model";
         }
 
-        return "{$this->laravel->getNamespace()}{$model}";
+        return "{$this->laravel->getNamespace()}$model";
     }
 
     /**
@@ -178,7 +177,7 @@ class InstallCommand extends Command
                 ->mapWithKeys(fn (string $column): array => [$column => $column]);
 
             if (Collection::make([...$existing, ...$columns])->doesntContain($default)) {
-                $options->prepend("Create {$default}", $default);
+                $options->prepend("Create $default", $default);
             }
 
             $selected = null;
@@ -205,10 +204,10 @@ class InstallCommand extends Command
     {
         $path = config_path('verifactu.php');
 
-        $config = Str::of($this->files->get($path))->replaceMatches($this->configLine('model'), fn (): string => "'model' => {$model}::class,");
+        $config = Str::of($this->files->get($path))->replaceMatches($this->configLine('model'), fn (): string => "'model' => $model::class,");
 
         foreach ($columns as $field => $column) {
-            $config = $config->replaceMatches($this->configLine($field), fn (): string => "'{$field}' => '{$column}',");
+            $config = $config->replaceMatches($this->configLine($field), fn (): string => "'$field' => '$column',");
         }
 
         $this->files->put($path, $config->toString());
@@ -225,7 +224,7 @@ class InstallCommand extends Command
     protected function writeMigration(string $table, array $columns): void
     {
         if ($columns === []) {
-            $this->components->info("The table {$table} has every column.");
+            $this->components->info("The table $table has every column.");
 
             return;
         }
@@ -235,11 +234,11 @@ class InstallCommand extends Command
         $directory = $this->laravel->databasePath('migrations');
 
         // One an earlier run wrote and that is not run yet: a second would add the same columns again.
-        $pending = Collection::make($this->files->glob(join_paths($directory, "*_*_*_*_{$name}.php")))
-            ->contains(fn (string $file): bool => Str::containsAll($this->files->get($file), Arr::map($columns, fn (string $column): string => "'{$column}'")));
+        $pending = Collection::make($this->files->glob(join_paths($directory, "*_*_*_*_$name.php")))
+            ->contains(fn (string $file): bool => Str::containsAll($this->files->get($file), Arr::map($columns, fn (string $column): string => "'$column'")));
 
         if ($pending) {
-            $this->components->warn("A migration {$name} adds these columns already: run php artisan migrate.");
+            $this->components->warn("A migration $name adds these columns already: run php artisan migrate.");
 
             return;
         }
@@ -252,7 +251,7 @@ class InstallCommand extends Command
             $this->files->get(__DIR__.'/../../../stubs/add_verifactu_columns.stub'),
         ));
 
-        $this->components->info("Wrote the migration {$name}, which adds ".Collection::make($columns)->join(', ', ' and '));
+        $this->components->info("Wrote the migration $name, which adds ".Collection::make($columns)->join(', ', ' and '));
     }
 
     /**
@@ -270,43 +269,43 @@ class InstallCommand extends Command
 
     /**
      * @param  array<string, string>  $columns
-     * @return array<int, string>
+     * @return Collection<int, string>
      */
-    protected function columnDefinitions(array $columns): array
+    protected function columnDefinitions(array $columns): Collection
     {
-        return Collection::make($columns)
-            ->map(fn (string $column, string $field): string => match ($field) {
-                'uuid' => "\$table->uuid('{$column}')->nullable()->unique();",
-                'status' => "\$table->string('{$column}')->nullable()->index();",
-                'issue_date' => "\$table->date('{$column}')->nullable();",
-                'qr_code' => "\$table->text('{$column}')->nullable();",
-                default => "\$table->string('{$column}')->nullable();",
-            })
-            ->values()
-            ->all();
+        return Collection::make($columns)->map($this->columnDefinition(...))->values();
+    }
+
+    protected function columnDefinition(string $column, string $field): string
+    {
+        return match ($field) {
+            'uuid' => "\$table->uuid('$column')->nullable()->unique();",
+            'status' => "\$table->string('$column')->nullable()->index();",
+            'issue_date' => "\$table->date('$column')->nullable();",
+            'qr_code' => "\$table->text('$column')->nullable();",
+            default => "\$table->string('$column')->nullable();",
+        };
     }
 
     /**
      * The indexes go first: SQLite refuses to drop an indexed column.
      *
      * @param  array<string, string>  $columns
-     * @return list<string>
+     * @return Collection<int, string>
      */
-    protected function columnDrops(array $columns): array
+    protected function columnDrops(array $columns): Collection
     {
-        $drops = [];
+        $drops = Collection::make();
 
         if (isset($columns['uuid'])) {
-            $drops[] = "\$table->dropUnique(['{$columns['uuid']}']);";
+            $drops->push("\$table->dropUnique(['{$columns['uuid']}']);");
         }
 
         if (isset($columns['status'])) {
-            $drops[] = "\$table->dropIndex(['{$columns['status']}']);";
+            $drops->push("\$table->dropIndex(['{$columns['status']}']);");
         }
 
-        $drops[] = "\$table->dropColumn([{$this->quote($columns)}]);";
-
-        return $drops;
+        return $drops->push("\$table->dropColumn([{$this->quote($columns)}]);");
     }
 
     /**
@@ -345,8 +344,8 @@ class InstallCommand extends Command
 
         $this->line("  To drop them, create a migration (php artisan make:migration drop_old_aeat_columns_from_{$table}_table) with:");
         $this->newLine();
-        $this->line("    Schema::table('{$table}', function (Blueprint \$table) {");
-        $indexDrops->each(fn (string $drop) => $this->line("        {$drop}"));
+        $this->line("    Schema::table('$table', function (Blueprint \$table) {");
+        $indexDrops->each(fn (string $drop) => $this->line("        $drop"));
         $this->line("        \$table->dropColumn([{$this->quote($old->all())}]);");
         $this->line('    });');
         $this->newLine();
@@ -357,15 +356,15 @@ class InstallCommand extends Command
      */
     protected function quote(array $columns): string
     {
-        return Collection::make($columns)->map(fn (string $column): string => "'{$column}'")->join(', ');
+        return Collection::make($columns)->map(fn (string $column): string => "'$column'")->join(', ');
     }
 
     /**
-     * @param  array<int, string>  $lines
+     * @param  Collection<int, string>  $lines
      */
-    protected function indent(array $lines): string
+    protected function indent(Collection $lines): string
     {
-        return Collection::make($lines)->map(fn (string $line): string => "            {$line}")->join(PHP_EOL);
+        return $lines->map(fn (string $line): string => "            $line")->join(PHP_EOL);
     }
 
     protected function printNextSteps(string $model): void
@@ -379,7 +378,7 @@ class InstallCommand extends Command
 
         $class = class_basename($model);
 
-        $this->line("  Add to {$model}:");
+        $this->line("  Add to $model:");
         $this->newLine();
         $this->line(<<<PHP
                 use Vlec\Verifactu\Contracts\VerifactuInvoice;
@@ -388,13 +387,13 @@ class InstallCommand extends Command
                 use Vlec\Verifactu\Recipient;
                 use Vlec\Verifactu\TaxLine;
 
-                class {$class} extends Model implements VerifactuInvoice
+                class $class extends Model implements VerifactuInvoice
                 {
                     use IssuesVerifactuInvoices;
 
                     public function toVerifactu(): InvoiceData
                     {
-                        return InvoiceData::make("Invoice {\$this->id}")
+                        return InvoiceData::make("Invoice \$this->id")
                             ->to(Recipient::spanish(\$this->customer_tax_id, \$this->customer_name))
                             ->lines([TaxLine::vat(\$this->subtotal_cents, rate: 21)]);
                     }

@@ -41,7 +41,7 @@ function applyBatchJob(InvoiceBatch $batch): ApplyInvoiceBatch
 function batchItems(Collection $invoices, array $failed = []): array
 {
     return $invoices->values()->map(function (Invoice $invoice, int $index) use ($failed): array {
-        $reference = "invoice:{$invoice->id}";
+        $reference = "invoice:$invoice->id";
 
         if (Collection::make($failed)->containsStrict($index)) {
             return ['index' => $index, 'external_reference' => $reference, 'result' => 'failed', 'invoice' => null, 'error' => ['code' => 'recipient_not_identified', 'message' => 'Unknown customer.']];
@@ -50,7 +50,7 @@ function batchItems(Collection $invoices, array $failed = []): array
         $number = (string) ($index + 1);
 
         return ['index' => $index, 'external_reference' => $reference, 'result' => 'issued', 'invoice' => serviceInvoice([
-            'uuid' => "invoice-uuid-{$number}",
+            'uuid' => "invoice-uuid-$number",
             'number' => $number,
             'invoice_number' => sprintf('FACT-2026-%05d', $number),
             'external_reference' => $reference,

@@ -105,7 +105,7 @@ class InvoiceRules
     {
         foreach (self::AssignedByService as $field => $code) {
             if (Arr::exists($body, $field)) {
-                return self::error($code, $field, "The service sets {$field}: remove it.");
+                return self::error($code, $field, "The service sets $field: remove it.");
             }
         }
 
@@ -136,12 +136,12 @@ class InvoiceRules
         $lineWithoutBase = $lines->search(fn (array $line): bool => ! Arr::exists($line, 'tax_base'));
 
         if ($lineWithoutBase !== false) {
-            return self::error('field_required', "lines.{$lineWithoutBase}.tax_base", "The lines.{$lineWithoutBase}.tax_base field is required.");
+            return self::error('field_required', "lines.$lineWithoutBase.tax_base", "The lines.$lineWithoutBase.tax_base field is required.");
         }
 
         $wrongAmount = $lines
             ->flatMap(fn (array $line, int $index): array => Collection::make(Arr::only($line, self::LineAmounts))
-                ->mapWithKeys(fn (mixed $amount, string $field): array => ["lines.{$index}.{$field}" => $amount])
+                ->mapWithKeys(fn (mixed $amount, string $field): array => ["lines.$index.$field" => $amount])
                 ->all())
             ->filter(fn (mixed $amount): bool => $amount !== null)
             ->prepend($body['total_amount'], 'total_amount')
@@ -153,7 +153,7 @@ class InvoiceRules
 
         $wrongRate = $lines
             ->flatMap(fn (array $line, int $index): array => Collection::make(Arr::only($line, self::LineRates))
-                ->mapWithKeys(fn (mixed $rate, string $field): array => ["lines.{$index}.{$field}" => $rate])
+                ->mapWithKeys(fn (mixed $rate, string $field): array => ["lines.$index.$field" => $rate])
                 ->all())
             ->filter(fn (mixed $rate): bool => $rate !== null)
             ->search(fn (mixed $rate): bool => ! is_string($rate) || ! Str::isMatch(self::Rate, $rate));
@@ -177,11 +177,11 @@ class InvoiceRules
         $recipient = $body['recipient'] ?? null;
 
         if ($recipient === null && Collection::make(self::TypesWithoutRecipient)->doesntContainStrict($type)) {
-            return self::error('recipient_required', 'recipient', "Invoices of type {$type} need a recipient.");
+            return self::error('recipient_required', 'recipient', "Invoices of type $type need a recipient.");
         }
 
         if ($recipient !== null && Collection::make(self::TypesWithoutRecipient)->containsStrict($type)) {
-            return self::error('recipient_not_allowed', 'recipient', "Invoices of type {$type} have no recipient.");
+            return self::error('recipient_not_allowed', 'recipient', "Invoices of type $type have no recipient.");
         }
 
         if ($recipient !== null && self::isInvalidName(Arr::get($body, 'recipient.name'))) {
@@ -208,21 +208,21 @@ class InvoiceRules
         }
 
         $intraEuSupply = $lines->contains(fn (array $line): bool => Arr::get($line, 'exemption_reason') === 'E5');
-        $withoutForeignId = Collection::make(self::ForeignId)->contains(fn (string $field): bool => blank(Arr::get($body, "recipient.{$field}")));
+        $withoutForeignId = Collection::make(self::ForeignId)->contains(fn (string $field): bool => blank(Arr::get($body, "recipient.$field")));
 
         if ($intraEuSupply && $withoutForeignId) {
             return self::error('exempt_intra_eu_supply_requires_foreign_recipient', 'recipient', 'Exemption E5 (exempt supply to another EU country) needs a recipient identified by a foreign ID: country_code, id_type and id.');
         }
 
         $references = Collection::make(Arr::wrap(Arr::get($body, 'correction.corrected_invoices', [])))
-            ->mapWithKeys(fn (mixed $invoice, int $index): array => ["correction.corrected_invoices.{$index}" => Arr::wrap($invoice)])
+            ->mapWithKeys(fn (mixed $invoice, int $index): array => ["correction.corrected_invoices.$index" => Arr::wrap($invoice)])
             ->merge(Collection::make(Arr::wrap(Arr::get($body, 'replaced_invoices', [])))
-                ->mapWithKeys(fn (mixed $invoice, int $index): array => ["replaced_invoices.{$index}" => Arr::wrap($invoice)]));
+                ->mapWithKeys(fn (mixed $invoice, int $index): array => ["replaced_invoices.$index" => Arr::wrap($invoice)]));
 
         $withoutDate = $references->search(fn (array $invoice): bool => ! is_string(Arr::get($invoice, 'issue_date')));
 
         if ($withoutDate !== false) {
-            return self::error('field_required', "{$withoutDate}.issue_date", "The {$withoutDate}.issue_date field is required.");
+            return self::error('field_required', "$withoutDate.issue_date", "The $withoutDate.issue_date field is required.");
         }
 
         // An invoice issued here goes by its number, one issued elsewhere by its invoice_number.
@@ -239,7 +239,7 @@ class InvoiceRules
         });
 
         if ($wrongNumber !== false) {
-            return self::error('invalid_referenced_invoice', "{$wrongNumber}.number", "The number is a whole number such as 42: the invoice's number within the series {$series} and the year of its issue_date.");
+            return self::error('invalid_referenced_invoice', "$wrongNumber.number", "The number is a whole number such as 42: the invoice's number within the series $series and the year of its issue_date.");
         }
 
         return null;

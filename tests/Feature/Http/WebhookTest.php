@@ -55,7 +55,7 @@ function webhookSignature(string $body, ?int $time = null, string $secret = 'whs
 {
     $time ??= now()->getTimestamp();
 
-    return "t={$time},v1=".hash_hmac('sha256', "{$time}.{$body}", $secret);
+    return "t=$time,v1=".hash_hmac('sha256', "$time.$body", $secret);
 }
 
 /**
@@ -107,8 +107,8 @@ it('refuses with a final 403, queueing nothing, a delivery with :dataset', funct
     'a signature 301 seconds ahead' => [fn (string $body): string => webhookSignature($body, now()->addSeconds(301)->getTimestamp())],
     'no v1' => [fn (string $body): string => 't='.now()->getTimestamp()],
     'no t' => [fn (string $body): string => Str::after(webhookSignature($body), ',')],
-    'a t that is not a number' => [fn (string $body): string => 't=now,v1='.hash_hmac('sha256', "now.{$body}", 'whsec_secret-for-tests')],
-    'a t that is not whole seconds' => [fn (string $body): string => 't='.now()->getTimestamp().'.5,v1='.hash_hmac('sha256', now()->getTimestamp().".5.{$body}", 'whsec_secret-for-tests')],
+    'a t that is not a number' => [fn (string $body): string => 't=now,v1='.hash_hmac('sha256', "now.$body", 'whsec_secret-for-tests')],
+    'a t that is not whole seconds' => [fn (string $body): string => 't='.now()->getTimestamp().'.5,v1='.hash_hmac('sha256', now()->getTimestamp().".5.$body", 'whsec_secret-for-tests')],
     'no signature header' => [fn (string $body): ?string => null],
 ]);
 
@@ -195,7 +195,7 @@ it('leaves the newest state after deliveries that arrive before and during a ref
     $invoice = Invoice::factory()->issued()->create();
     $body = webhookBody(uuids: [$invoice->verifactu_uuid]);
     $reads = 0;
-    Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => function () use (&$reads, $body, $invoice) {
+    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => function () use (&$reads, $body, $invoice) {
         $reads++;
 
         if ($reads === 1) {

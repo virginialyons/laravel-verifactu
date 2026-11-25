@@ -104,20 +104,19 @@ class InvoiceData implements Arrayable
      * The lines as AEAT receives them: the lines with the same VAT rate, or
      * the same exemption reason, become one line with their bases added up.
      *
-     * @return array<int, TaxLine>
+     * @return Collection<int, TaxLine>
      */
-    public function taxLines(): array
+    public function taxLines(): Collection
     {
         return Collection::make($this->lines)
             ->groupBy(fn (TaxLine $line): string => $line->groupKey())
             ->map(fn (Collection $lines): TaxLine => $lines->firstOrFail()->withBaseCents($lines->sum(fn (TaxLine $line): int => $line->baseCents)))
-            ->values()
-            ->all();
+            ->values();
     }
 
     public function totalCents(): int
     {
-        return Collection::make($this->taxLines())->sum(fn (TaxLine $line): int => $line->totalCents());
+        return $this->taxLines()->sum(fn (TaxLine $line): int => $line->totalCents());
     }
 
     /**
@@ -135,7 +134,7 @@ class InvoiceData implements Arrayable
             $body['recipient'] = $this->recipient->toArray();
         }
 
-        $body['lines'] = Collection::make($this->taxLines())->toArray();
+        $body['lines'] = $this->taxLines()->toArray();
 
         if ($this->type === InvoiceType::ReplacesSimplified) {
             $body['replaced_invoices'] = $this->references;

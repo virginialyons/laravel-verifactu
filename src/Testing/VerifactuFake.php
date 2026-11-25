@@ -198,21 +198,21 @@ class VerifactuFake extends Client implements Fake
         $reference = $invoice->verifactuReference();
         $uuid = $this->uuidOf($invoice);
 
-        throw_if($uuid === null, LogicException::class, "The invoice [{$reference}] is not on the fake Verifactu: issue it first.");
+        throw_if($uuid === null, LogicException::class, "The invoice [$reference] is not on the fake Verifactu: issue it first.");
 
         $records = $this->records[$uuid];
         $last = count($records) - 1;
         $record = $records[$last];
 
-        throw_if($record['status'] !== 'pending', LogicException::class, "Nothing of the invoice [{$reference}] awaits AEAT's answer: correct or cancel it first.");
+        throw_if($record['status'] !== 'pending', LogicException::class, "Nothing of the invoice [$reference] awaits AEAT's answer: correct or cancel it first.");
 
         throw_if($status === InvoiceStatus::Pending, LogicException::class, 'AEAT answers accepted, accepted with errors or rejected, or registers a cancellation: pending is no answer.');
 
         $cancellation = $record['type'] === 'cancellation';
 
-        throw_if($status === InvoiceStatus::Cancelled && ! $cancellation, LogicException::class, "No cancellation of the invoice [{$reference}] awaits AEAT's answer: cancel it first.");
+        throw_if($status === InvoiceStatus::Cancelled && ! $cancellation, LogicException::class, "No cancellation of the invoice [$reference] awaits AEAT's answer: cancel it first.");
 
-        throw_if($cancellation && $status !== InvoiceStatus::Cancelled && $status !== InvoiceStatus::Accepted, LogicException::class, "The cancellation of the invoice [{$reference}] awaits AEAT's answer: decide Cancelled.");
+        throw_if($cancellation && $status !== InvoiceStatus::Cancelled && $status !== InvoiceStatus::Accepted, LogicException::class, "The cancellation of the invoice [$reference] awaits AEAT's answer: decide Cancelled.");
 
         throw_if($errorCode !== null && $status !== InvoiceStatus::AcceptedWithErrors && $status !== InvoiceStatus::Rejected, LogicException::class, 'AEAT gives an error code only when it accepts a record with errors or rejects it.');
 
@@ -265,7 +265,7 @@ class VerifactuFake extends Client implements Fake
         $reference = $invoice->verifactuReference();
         $uuid = $this->uuidOf($invoice);
 
-        PHPUnit::assertNotNull($uuid, "Verifactu did not issue the invoice [{$reference}].");
+        PHPUnit::assertNotNull($uuid, "Verifactu did not issue the invoice [$reference].");
 
         if (! $callback instanceof Closure) {
             return;
@@ -273,7 +273,7 @@ class VerifactuFake extends Client implements Fake
 
         PHPUnit::assertTrue(
             $callback($this->requests[$uuid]),
-            "Verifactu issued the invoice [{$reference}], but not as the callback expects.",
+            "Verifactu issued the invoice [$reference], but not as the callback expects.",
         );
     }
 
@@ -281,7 +281,7 @@ class VerifactuFake extends Client implements Fake
     {
         $references = Collection::make($this->invoices)->pluck('external_reference')->implode(', ');
 
-        PHPUnit::assertEmpty($this->invoices, "Verifactu issued invoices unexpectedly: [{$references}].");
+        PHPUnit::assertEmpty($this->invoices, "Verifactu issued invoices unexpectedly: [$references].");
     }
 
     public function assertBatchSent(): void
@@ -371,7 +371,7 @@ class VerifactuFake extends Client implements Fake
             return $handler();
         }
 
-        $fingerprint = "{$route} {$request->uri()->path()} {$request->body()}";
+        $fingerprint = "$route {$request->uri()->path()} {$request->body()}";
         $reply = $this->replies[$key] ?? null;
 
         if ($reply !== null && $reply['request'] !== $fingerprint) {
@@ -422,7 +422,7 @@ class VerifactuFake extends Client implements Fake
         $invoices = $query->apply($rows)
             ->map(fn (array $row, string $uuid): array => [
                 ...Arr::except($row['invoice'], 'qr_code'),
-                ...Arr::only($this->relations($uuid), $query->includes()),
+                ...Arr::only($this->relations($uuid), $query->includes()->all()),
             ])
             ->values()
             ->all();
@@ -502,7 +502,7 @@ class VerifactuFake extends Client implements Fake
 
             $errors = $invoices
                 ->filter(fn (array $invoice): bool => $repeated->containsStrict($invoice['external_reference'] ?? null))
-                ->mapWithKeys(fn (array $invoice, int $index): array => ["invoices.{$index}.external_reference" => [$message]])
+                ->mapWithKeys(fn (array $invoice, int $index): array => ["invoices.$index.external_reference" => [$message]])
                 ->all();
 
             return $this->refuse($this->refusal(422, 'validation_failed', $message, $errors));
@@ -580,7 +580,7 @@ class VerifactuFake extends Client implements Fake
     {
         foreach (['tax_id', 'name'] as $field) {
             if (blank($body[$field] ?? null)) {
-                return $this->refuse($this->invalid('field_required', $field, "The {$field} field is required."));
+                return $this->refuse($this->invalid('field_required', $field, "The $field field is required."));
             }
         }
 

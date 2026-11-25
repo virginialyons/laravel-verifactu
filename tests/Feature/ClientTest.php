@@ -21,7 +21,7 @@ it('sends each operation to its endpoint with the token', function (Closure $cal
 
     Http::assertSent(function (Request $request) use ($method, $url, $body): bool {
         expect($request->method())->toBe($method)
-            ->and(urldecode($request->url()))->toBe("https://verifactu.test/api/v1/{$url}")
+            ->and(urldecode($request->url()))->toBe("https://verifactu.test/api/v1/$url")
             ->and($request->header('Authorization'))->toBe(['Bearer vf_test_token-for-tests'])
             ->and($request->header('Accept'))->toBe(['application/json']);
 

@@ -66,9 +66,9 @@ it('stores a 201 and fires InvoiceIssued, sending the reference and its key', fu
 
     $job = issueJob($invoice)->assertNotReleased();
 
-    expect($job->idempotencyKey)->toStartWith("invoice:{$invoice->id}:");
+    expect($job->idempotencyKey)->toStartWith("invoice:$invoice->id:");
     Http::assertSent(fn (Request $request): bool => $request->header('Idempotency-Key') === [$job->idempotencyKey]
-        && $request['external_reference'] === "invoice:{$invoice->id}");
+        && $request['external_reference'] === "invoice:$invoice->id");
     expect($invoice->fresh()->verifactu_uuid)->toBe('9d2c4b1e-0f6a-4c1b-9a59-6f1f2b3c4d5e');
     Event::assertDispatched(fn (InvoiceIssued $event): bool => $event->invoice->is($invoice));
 });
@@ -84,7 +84,7 @@ it('stores the invoice already issued for the reference on a 409 external_refere
 
     issueJob($invoice);
 
-    Http::assertSent(fn (Request $request): bool => urldecode($request->url()) === "https://verifactu.test/api/v1/invoices?filter[external_reference]=invoice:{$invoice->id}");
+    Http::assertSent(fn (Request $request): bool => urldecode($request->url()) === "https://verifactu.test/api/v1/invoices?filter[external_reference]=invoice:$invoice->id");
     expect($invoice->fresh())
         ->verifactu_uuid->toBe('uuid-1')
         ->qr->toBe('iVBORw0KGgo=');
@@ -227,7 +227,8 @@ it('queues the job to retry for the 24 hours the service replays its key, failin
 
     Invoice::factory()->create()->sendToVerifactu();
 
-    expect(json_decode((string) DB::table('jobs')->value('payload'), true))
+    expect(DB::table('jobs')->value('payload'))
+        ->json()
         ->retryUntil->toBe(now()->addDay()->getTimestamp())
         ->maxExceptions->toBe(1);
 });

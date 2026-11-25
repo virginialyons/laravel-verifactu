@@ -48,7 +48,7 @@ it('refreshes every pending invoice of a model without timestamps', function ():
 
 it('applies the batches not applied yet', function (): void {
     foreach (['queued', 'processing', 'completed', 'completed_with_errors'] as $status) {
-        InvoiceBatch::create(['uuid' => "{$status}-batch", 'status' => $status]);
+        InvoiceBatch::create(['uuid' => "$status-batch", 'status' => $status]);
     }
     Queue::fake([ApplyInvoiceBatch::class]);
 
@@ -68,7 +68,7 @@ it('applies, once, a batch whose completion webhook came before it was stored', 
     Http::fake([
         'verifactu.test/api/v1/invoice-batches/batch-1' => Http::response(['data' => serviceBatch(['uuid' => 'batch-1', 'status' => 'completed', 'total' => 1, 'processed' => 1, 'succeeded' => 1])]),
         'verifactu.test/api/v1/invoice-batches/batch-1/items*' => Http::response([
-            'data' => [['index' => 0, 'external_reference' => "invoice:{$invoice->id}", 'result' => 'issued', 'invoice' => serviceInvoice(['uuid' => 'invoice-uuid-1']), 'error' => null]],
+            'data' => [['index' => 0, 'external_reference' => "invoice:$invoice->id", 'result' => 'issued', 'invoice' => serviceInvoice(['uuid' => 'invoice-uuid-1']), 'error' => null]],
             'meta' => ['current_page' => 1, 'last_page' => 1],
         ]),
     ]);

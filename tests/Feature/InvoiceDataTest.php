@@ -22,7 +22,7 @@ use Workbench\App\Models\Invoice;
  */
 function serviceExample(string $slug): array
 {
-    $example = File::json(__DIR__."/../Fixtures/examples/{$slug}.json");
+    $example = File::json(__DIR__."/../Fixtures/examples/$slug.json");
 
     return withTwoDecimals($example['request']['body']);
 }
@@ -121,8 +121,19 @@ it('groups lines with the same rate or exemption reason and adds up their bases'
             ['tax_base' => '150.00', 'operation_qualification' => 'S1', 'tax_rate' => '21', 'tax_amount' => '31.50'],
             ['tax_base' => '300.00', 'exemption_reason' => 'E1'],
         ])
-        ->total_amount->toBe('481.50')
-        ->and($data->taxLines())->toHaveCount(2);
+        ->total_amount->toBe('481.50');
+});
+
+it('gives the grouped lines back as a collection, to print on the invoice', function (): void {
+    $data = InvoiceData::make('Order 1')->lines([TaxLine::vat(10000, rate: 21), TaxLine::exempt(30000), TaxLine::vat(5000, rate: 21)]);
+
+    expect($data->taxLines())
+        ->toBeInstanceOf(Collection::class)
+        ->toHaveCount(2)
+        ->each->toBeInstanceOf(TaxLine::class)
+        ->and($data->taxLines()->first())
+        ->baseCents->toBe(15000)
+        ->taxCents()->toBe(3150);
 });
 
 it('keeps lines exempt for different reasons apart', function (): void {
@@ -138,7 +149,7 @@ it('works the tax out once per grouped line', function (): void {
     $data = InvoiceData::make('Two pens')->lines([TaxLine::vat(25, rate: 10), TaxLine::vat(25, rate: 10)]);
 
     // Each 0.25 alone would round 0.025 up to 0.03; together 0.50 makes 0.05.
-    expect($data->taxLines()[0]->taxCents())->toBe(5)
+    expect($data->taxLines()->first()->taxCents())->toBe(5)
         ->and($data->totalCents())->toBe(55);
 });
 

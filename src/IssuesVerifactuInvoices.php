@@ -84,7 +84,7 @@ trait IssuesVerifactuInvoices
 
         throw_if(! is_int($key) && ! is_string($key), LogicException::class, 'Save the invoice before sending it to Verifactu.');
 
-        return "invoice:{$key}";
+        return "invoice:$key";
     }
 
     /**
@@ -142,6 +142,6 @@ trait IssuesVerifactuInvoices
      */
     protected static function verifactuColumn(string $field): string
     {
-        return config()->string("verifactu.columns.{$field}");
+        return config()->string("verifactu.columns.$field");
     }
 }

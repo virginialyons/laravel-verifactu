@@ -29,7 +29,7 @@ function refreshJob(Invoice $invoice): RefreshInvoice
 it('stores the invoice as the service has it and fires the event of its new status', function (): void {
     $invoice = Invoice::factory()->issued()->create();
     Event::fake([InvoiceRejected::class]);
-    Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => Http::response(['data' => serviceInvoice([
+    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => Http::response(['data' => serviceInvoice([
         'uuid' => $invoice->verifactu_uuid,
         'status' => 'rejected',
         'aeat' => ['verification_code' => null, 'error_code' => '1105', 'error_message' => 'NIF no identificado.', 'registered_at' => null],
@@ -56,7 +56,7 @@ it('fires no status event a read that ran meanwhile already fired', function ():
 
 it('releases the job after a retryable answer, with one request per attempt', function (): void {
     $invoice = Invoice::factory()->issued()->create();
-    Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => Http::response(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '7'])]);
+    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => Http::response(['message' => 'Busy.', 'code' => 'service_busy'], 503, ['Retry-After' => '7'])]);
 
     refreshJob($invoice)->assertReleased(7);
 
@@ -66,14 +66,14 @@ it('releases the job after a retryable answer, with one request per attempt', fu
 
 it('fails on a refusal', function (): void {
     $invoice = Invoice::factory()->issued()->create();
-    Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => Http::response(['message' => 'Not found.'], 404)]);
+    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => Http::response(['message' => 'Not found.'], 404)]);
 
     refreshJob($invoice);
 })->throws(VerifactuException::class);
 
 it('waits longer before each later attempt when the service gives no Retry-After', function (): void {
     $invoice = Invoice::factory()->issued()->create();
-    Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => Http::response(['message' => 'Error.'], 500)]);
+    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => Http::response(['message' => 'Error.'], 500)]);
     $job = new RefreshInvoice($invoice)->withFakeQueueInteractions();
     $job->job->attempts = 3;
 
@@ -104,7 +104,7 @@ it('lets another read of the invoice run a minute after a worker died reading it
     $job = new RefreshInvoice($invoice);
     $lock = new WithoutOverlapping($invoice->verifactuReference())->getLockKey($job);
     $taken = [];
-    Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => function () use ($invoice, $lock, &$taken) {
+    Http::fake(["verifactu.test/api/v1/invoices/$invoice->verifactu_uuid" => function () use ($invoice, $lock, &$taken) {
         // The lock this read holds, as a worker killed now would leave it.
         $this->travel(59)->seconds();
         $taken[] = Cache::lock($lock)->get();

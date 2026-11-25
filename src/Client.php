@@ -131,7 +131,7 @@ class Client
      */
     public function getInvoice(string $uuid): array
     {
-        return $this->data($this->send('GET', "invoices/{$uuid}"));
+        return $this->data($this->send('GET', "invoices/$uuid"));
     }
 
     /**
@@ -140,7 +140,7 @@ class Client
      */
     public function correctInvoice(string $uuid, array $correction, ?string $idempotencyKey = null): array
     {
-        return $this->post("invoices/{$uuid}/corrections", $idempotencyKey, $correction);
+        return $this->post("invoices/$uuid/corrections", $idempotencyKey, $correction);
     }
 
     /**
@@ -148,7 +148,7 @@ class Client
      */
     public function cancelInvoice(string $uuid, ?string $idempotencyKey = null): array
     {
-        return $this->post("invoices/{$uuid}/cancellation", $idempotencyKey);
+        return $this->post("invoices/$uuid/cancellation", $idempotencyKey);
     }
 
     /**
@@ -165,7 +165,7 @@ class Client
      */
     public function getInvoiceBatch(string $uuid): array
     {
-        return $this->data($this->send('GET', "invoice-batches/{$uuid}"));
+        return $this->data($this->send('GET', "invoice-batches/$uuid"));
     }
 
     /**
@@ -173,7 +173,7 @@ class Client
      */
     public function listInvoiceBatchItems(string $uuid, int $page = 1): array
     {
-        return $this->send('GET', "invoice-batches/{$uuid}/items", ['query' => ['page' => $page]]);
+        return $this->send('GET', "invoice-batches/$uuid/items", ['query' => ['page' => $page]]);
     }
 
     /**
@@ -229,9 +229,7 @@ class Client
         }
 
         // A redirect, or a 2xx that isn't the API's JSON (a proxy's page), is no answer to trust.
-        if (! $response->successful() || ! is_array($response->json('data'))) {
-            throw VerifactuException::fromResponse($response);
-        }
+        throw_unless($response->successful() && is_array($response->json('data')), fn (): VerifactuException => VerifactuException::fromResponse($response));
 
         /** @var array<string, mixed> */
         return $response->json();

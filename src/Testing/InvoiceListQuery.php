@@ -53,11 +53,11 @@ class InvoiceListQuery
             return ['code' => 'invalid_filter', 'message' => 'The list has no such filter. Use one of the filters the endpoint lists.'];
         }
 
-        if (Collection::make($this->sorts())->map(fn (string $sort): string => Str::ltrim($sort, '-'))->diff(self::Sorts)->isNotEmpty()) {
+        if ($this->sorts()->map(fn (string $sort): string => Str::ltrim($sort, '-'))->diff(self::Sorts)->isNotEmpty()) {
             return ['code' => 'invalid_sort', 'message' => 'The list cannot be sorted by this field. Use one of the sorts the endpoint lists.'];
         }
 
-        if (Collection::make($this->includes())->diff(self::Includes)->isNotEmpty()) {
+        if ($this->includes()->diff(self::Includes)->isNotEmpty()) {
             return ['code' => 'invalid_include', 'message' => 'The list cannot include this relation. Use one of the includes the endpoint lists.'];
         }
 
@@ -76,9 +76,9 @@ class InvoiceListQuery
     }
 
     /**
-     * @return array<int, string>
+     * @return Collection<int, string>
      */
-    public function includes(): array
+    public function includes(): Collection
     {
         return $this->names('include');
     }
@@ -165,14 +165,14 @@ class InvoiceListQuery
     }
 
     /**
-     * @return array<int, string>
+     * @return Collection<int, string>
      */
-    protected function sorts(): array
+    protected function sorts(): Collection
     {
         $sorts = $this->names('sort');
 
-        if ($sorts === []) {
-            return ['-issue_date'];
+        if ($sorts->isEmpty()) {
+            return Collection::make(['-issue_date']);
         }
 
         return $sorts;
@@ -182,16 +182,16 @@ class InvoiceListQuery
      * The comma-separated names of a query parameter, such as the sorts. A
      * parameter sent as a list names nothing the list allows.
      *
-     * @return array<int, string>
+     * @return Collection<int, string>
      */
-    protected function names(string $parameter): array
+    protected function names(string $parameter): Collection
     {
         $value = $this->query[$parameter] ?? '';
 
         if (! is_string($value)) {
-            return ["{$parameter}[]"];
+            $value = "{$parameter}[]";
         }
 
-        return Str::of($value)->explode(',')->reject(fn (string $name): bool => blank($name))->values()->all();
+        return Str::of($value)->explode(',')->reject(fn (string $name): bool => blank($name))->values();
     }
 }

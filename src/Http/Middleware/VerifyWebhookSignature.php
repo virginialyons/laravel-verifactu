@@ -52,7 +52,7 @@ class VerifyWebhookSignature
             return true;
         }
 
-        if (! hash_equals(hash_hmac('sha256', "{$timestamp}.{$payload}", $secret), $signature)) {
+        if (! hash_equals(hash_hmac('sha256', "$timestamp.$payload", $secret), $signature)) {
             return true;
         }
 

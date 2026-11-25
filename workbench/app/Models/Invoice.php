@@ -35,17 +35,11 @@ class Invoice extends Model implements VerifactuInvoice
 
     public function toVerifactu(): InvoiceData
     {
-        $lines = [];
-
-        if ($this->exempt_cents !== 0) {
-            $lines[] = TaxLine::exempt($this->exempt_cents);
-        }
-
-        if ($this->taxable_cents !== 0) {
-            $lines[] = TaxLine::vat($this->taxable_cents, rate: 21);
-        }
-
-        $data = InvoiceData::make("Order {$this->id}")->lines($lines);
+        $data = InvoiceData::make("Order $this->id")
+            ->lines(collect([
+                TaxLine::exempt($this->exempt_cents),
+                TaxLine::vat($this->taxable_cents, rate: 21),
+            ])->reject(fn (TaxLine $line): bool => $line->baseCents === 0));
 
         if ($this->is_simplified) {
             $data = $data->simplified();

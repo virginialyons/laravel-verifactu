@@ -77,18 +77,18 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * @return list<Item>
+     * @return Collection<int, Item>
      */
-    protected function items(Client $client): array
+    protected function items(Client $client): Collection
     {
-        $items = [];
+        $items = Collection::make();
         $page = 1;
 
         do {
             /** @var array{data: list<Item>, meta: array{last_page: int}} $answer */
             $answer = $client->listInvoiceBatchItems($this->batch->uuid, $page);
 
-            $items = [...$items, ...$answer['data']];
+            $items->push(...$answer['data']);
 
             $page++;
         } while ($page <= $answer['meta']['last_page']);
@@ -97,11 +97,11 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * @param  list<Item>  $items
+     * @param  Collection<int, Item>  $items
      */
-    protected function apply(array $items): void
+    protected function apply(Collection $items): void
     {
-        $invoices = $this->invoices(Collection::make($items)->map(fn (array $item): ?string => $item['external_reference']));
+        $invoices = $this->invoices($items->map(fn (array $item): ?string => $item['external_reference']));
 
         foreach ($items as $item) {
             $invoice = $invoices->get($item['external_reference']);

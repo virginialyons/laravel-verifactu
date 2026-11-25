@@ -88,7 +88,7 @@ it('hands the callback the body the invoice was issued from', function (): void 
     $invoice->sendToVerifactu();
 
     Verifactu::assertIssued($invoice, fn (array $body): bool => $body['total_amount'] === '300.00'
-        && $body['external_reference'] === "invoice:{$invoice->id}");
+        && $body['external_reference'] === "invoice:$invoice->id");
 });
 
 it('plays a rejection with AEAT\'s error code', function (): void {
@@ -274,7 +274,7 @@ it('refuses to decide on an invoice that awaits nothing from AEAT', function ():
     Verifactu::decide($invoice, InvoiceStatus::Accepted);
 
     expect(fn () => Verifactu::decide($invoice, InvoiceStatus::Rejected))
-        ->toThrow(LogicException::class, "Nothing of the invoice [invoice:{$invoice->id}] awaits AEAT's answer: correct or cancel it first.");
+        ->toThrow(LogicException::class, "Nothing of the invoice [invoice:$invoice->id] awaits AEAT's answer: correct or cancel it first.");
 });
 
 it('works without the service\'s URL and token in the app\'s test environment', function (): void {
@@ -292,7 +292,7 @@ it('refuses to decide on an invoice it never issued', function (): void {
     $invoice = Invoice::factory()->create();
 
     expect(fn () => Verifactu::decide($invoice, InvoiceStatus::Accepted))
-        ->toThrow(LogicException::class, "The invoice [invoice:{$invoice->id}] is not on the fake Verifactu: issue it first.");
+        ->toThrow(LogicException::class, "The invoice [invoice:$invoice->id] is not on the fake Verifactu: issue it first.");
 });
 
 it('fails :dataset with a clear message', function (Closure $assertion, Closure $message): void {
@@ -307,15 +307,15 @@ it('fails :dataset with a clear message', function (Closure $assertion, Closure 
 })->with([
     'assertIssued' => [
         fn (Invoice $invoice) => Verifactu::assertIssued($invoice),
-        fn (Invoice $invoice): string => "Verifactu did not issue the invoice [invoice:{$invoice->id}].",
+        fn (Invoice $invoice): string => "Verifactu did not issue the invoice [invoice:$invoice->id].",
     ],
     'assertIssued with a callback' => [
         fn (Invoice $invoice, Invoice $issued) => Verifactu::assertIssued($issued, fn (array $body): bool => false),
-        fn (Invoice $invoice, Invoice $issued): string => "Verifactu issued the invoice [invoice:{$issued->id}], but not as the callback expects.",
+        fn (Invoice $invoice, Invoice $issued): string => "Verifactu issued the invoice [invoice:$issued->id], but not as the callback expects.",
     ],
     'assertNothingIssued' => [
         fn () => Verifactu::assertNothingIssued(),
-        fn (Invoice $invoice, Invoice $issued): string => "Verifactu issued invoices unexpectedly: [invoice:{$issued->id}].",
+        fn (Invoice $invoice, Invoice $issued): string => "Verifactu issued invoices unexpectedly: [invoice:$issued->id].",
     ],
     'assertBatchSent' => [
         fn () => Verifactu::assertBatchSent(),
@@ -323,11 +323,11 @@ it('fails :dataset with a clear message', function (Closure $assertion, Closure 
     ],
     'assertCorrected' => [
         fn (Invoice $invoice, Invoice $issued) => Verifactu::assertCorrected($issued),
-        fn (Invoice $invoice, Invoice $issued): string => "The invoice [invoice:{$issued->id}] was not corrected on Verifactu.",
+        fn (Invoice $invoice, Invoice $issued): string => "The invoice [invoice:$issued->id] was not corrected on Verifactu.",
     ],
     'assertCancelled' => [
         fn (Invoice $invoice, Invoice $issued) => Verifactu::assertCancelled($issued),
-        fn (Invoice $invoice, Invoice $issued): string => "The invoice [invoice:{$issued->id}] was not cancelled on Verifactu.",
+        fn (Invoice $invoice, Invoice $issued): string => "The invoice [invoice:$issued->id] was not cancelled on Verifactu.",
     ],
 ]);
 
@@ -469,9 +469,9 @@ it('answers 201 to a correction and a cancellation', function (): void {
     Verifactu::fake();
     $invoice = answeredInvoice(InvoiceStatus::Rejected);
 
-    $correction = Verifactu::http()->post("invoices/{$invoice->verifactu_uuid}/corrections", $invoice->toVerifactuRequest());
+    $correction = Verifactu::http()->post("invoices/$invoice->verifactu_uuid/corrections", $invoice->toVerifactuRequest());
     Verifactu::decide($invoice, InvoiceStatus::Accepted);
-    $cancellation = Verifactu::http()->post("invoices/{$invoice->verifactu_uuid}/cancellation");
+    $cancellation = Verifactu::http()->post("invoices/$invoice->verifactu_uuid/cancellation");
 
     expect($correction->status())->toBe(201)
         ->and($cancellation->status())->toBe(201);
@@ -567,7 +567,7 @@ it('refuses to decide :dataset', function (Closure $setUp, InvoiceStatus $status
 
 it('lists 25 invoices a page, with the links and meta the service gives', function (): void {
     Verifactu::fake();
-    Collection::range(1, 30)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-{$order}"])));
+    Collection::range(1, 30)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-$order"])));
     $url = 'https://verifactu.test/api/v1/invoices';
 
     $page = Verifactu::listInvoices(['page' => ['number' => 2]]);
@@ -575,9 +575,9 @@ it('lists 25 invoices a page, with the links and meta the service gives', functi
     expect($page['data'])->toHaveCount(5)
         ->and($page['data'][0])->external_reference->toBe('order-26')->not->toHaveKey('qr_code')
         ->and($page['links'])->toBe([
-            'first' => "{$url}?page%5Bnumber%5D=1",
-            'last' => "{$url}?page%5Bnumber%5D=2",
-            'prev' => "{$url}?page%5Bnumber%5D=1",
+            'first' => "$url?page%5Bnumber%5D=1",
+            'last' => "$url?page%5Bnumber%5D=2",
+            'prev' => "$url?page%5Bnumber%5D=1",
             'next' => null,
         ])
         ->and($page['meta'])->toBe([
@@ -585,9 +585,9 @@ it('lists 25 invoices a page, with the links and meta the service gives', functi
             'from' => 26,
             'last_page' => 2,
             'links' => [
-                ['url' => "{$url}?page%5Bnumber%5D=1", 'label' => '&laquo; Previous', 'page' => 1, 'active' => false],
-                ['url' => "{$url}?page%5Bnumber%5D=1", 'label' => '1', 'page' => 1, 'active' => false],
-                ['url' => "{$url}?page%5Bnumber%5D=2", 'label' => '2', 'page' => 2, 'active' => true],
+                ['url' => "$url?page%5Bnumber%5D=1", 'label' => '&laquo; Previous', 'page' => 1, 'active' => false],
+                ['url' => "$url?page%5Bnumber%5D=1", 'label' => '1', 'page' => 1, 'active' => false],
+                ['url' => "$url?page%5Bnumber%5D=2", 'label' => '2', 'page' => 2, 'active' => true],
                 ['url' => null, 'label' => 'Next &raquo;', 'page' => null, 'active' => false],
             ],
             'path' => $url,
@@ -599,7 +599,7 @@ it('lists 25 invoices a page, with the links and meta the service gives', functi
 
 it('keeps the query in the page links and lists at most 100 a page', function (): void {
     Verifactu::fake();
-    Collection::range(1, 101)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-{$order}"])));
+    Collection::range(1, 101)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-$order"])));
 
     $page = Verifactu::listInvoices(['filter' => ['status' => 'pending'], 'page' => ['size' => 500]]);
 
@@ -682,7 +682,7 @@ it('sorts the list by the next field when the first one ties', function (): void
 
 it('reads the page and its size as the service does: :dataset', function (array $page, int $number, int $size): void {
     Verifactu::fake();
-    Collection::range(1, 3)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-{$order}"])));
+    Collection::range(1, 3)->each(fn (int $order) => Verifactu::createInvoice(sale(['external_reference' => "order-$order"])));
 
     expect(Verifactu::listInvoices(['page' => $page])['meta'])
         ->current_page->toBe($number)
@@ -803,9 +803,9 @@ it('leaves the requests it does not play to the app\'s own fake', function (): v
     Http::fake(['verifactu.test/api/v1/invoices/*/xml' => Http::response(['data' => ['records' => []]])]);
     $uuid = Verifactu::createInvoice(sale())['uuid'];
 
-    expect(Verifactu::http()->get("invoices/{$uuid}/xml")->json())->toBe(['data' => ['records' => []]])
-        ->and(fn () => Verifactu::http()->get("invoices/{$uuid}/aeat-status"))
-        ->toThrow(StrayRequestException::class, "invoices/{$uuid}/aeat-status");
+    expect(Verifactu::http()->get("invoices/$uuid/xml")->json())->toBe(['data' => ['records' => []]])
+        ->and(fn () => Verifactu::http()->get("invoices/$uuid/aeat-status"))
+        ->toThrow(StrayRequestException::class, "invoices/$uuid/aeat-status");
 });
 
 it('answers 404 for an invoice or batch it does not hold', function (Closure $request): void {
@@ -1067,7 +1067,7 @@ it('reads a batch\'s items 100 a page, from the first: :dataset', function (stri
     Verifactu::fake();
     $uuid = Verifactu::createInvoiceBatch(['invoices' => [sale()]])['uuid'];
 
-    expect(Verifactu::http()->get("invoice-batches/{$uuid}/items{$query}")->json('meta'))
+    expect(Verifactu::http()->get("invoice-batches/$uuid/items$query")->json('meta'))
         ->current_page->toBe($page)
         ->per_page->toBe(100);
 })->with([

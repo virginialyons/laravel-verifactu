@@ -139,7 +139,7 @@ it('cancels the invoice and stores the answer', function (): void {
 it('sends one Idempotency-Key across a timeout and its retry', function (Closure $call, string $path): void {
     Sleep::fake();
     $invoice = Invoice::factory()->issued()->create(['verifactu_uuid' => 'uuid-1', 'aeat_status' => 'accepted']);
-    Http::fake(["verifactu.test/api/v1/invoices/uuid-1/{$path}" => Http::sequence()
+    Http::fake(["verifactu.test/api/v1/invoices/uuid-1/$path" => Http::sequence()
         ->pushFailedConnection()
         ->push(['data' => serviceInvoice()], 201)]);
 
@@ -155,7 +155,7 @@ it('sends one Idempotency-Key across a timeout and its retry', function (Closure
 
 it('throws the service\'s refusal of a fix or a cancellation and stores nothing', function (Closure $call, string $path, int $status, string $code): void {
     $invoice = Invoice::factory()->issued()->create(['verifactu_uuid' => 'uuid-1', 'aeat_status' => 'accepted']);
-    Http::fake(["verifactu.test/api/v1/invoices/uuid-1/{$path}" => Http::response(['message' => 'Refused.', 'code' => $code], $status)]);
+    Http::fake(["verifactu.test/api/v1/invoices/uuid-1/$path" => Http::response(['message' => 'Refused.', 'code' => $code], $status)]);
 
     expect(fn () => $call($invoice))
         ->toThrow(function (VerifactuException $exception) use ($code): void {
@@ -201,8 +201,8 @@ it('sends an invoice again after a refusal, once the sale is fixed', function ()
 it('refers to the sale by the model\'s key', function (): void {
     $invoice = Invoice::factory()->create();
 
-    expect($invoice->verifactuReference())->toBe("invoice:{$invoice->id}")
-        ->and($invoice->toVerifactuRequest())->external_reference->toBe("invoice:{$invoice->id}")
+    expect($invoice->verifactuReference())->toBe("invoice:$invoice->id")
+        ->and($invoice->toVerifactuRequest())->external_reference->toBe("invoice:$invoice->id")
         ->and(fn () => Invoice::factory()->make()->verifactuReference())
         ->toThrow(LogicException::class, 'Save the invoice before sending it to Verifactu.');
 });
