@@ -44,7 +44,7 @@ it('issues an invoice and plays AEAT\'s acceptance through the real jobs', funct
     Verifactu::decide($invoice, InvoiceStatus::Accepted);
 
     Verifactu::assertIssued($invoice);
-    Event::assertDispatched(InvoiceAccepted::class, fn (InvoiceAccepted $event): bool => $event->invoice->is($invoice));
+    Event::assertDispatched(fn (InvoiceAccepted $event): bool => $event->invoice->is($invoice));
     expect($invoice->fresh())
         ->verifactu_uuid->toBeString()
         ->aeat_status->toBe(InvoiceStatus::Accepted)
@@ -99,7 +99,7 @@ it('plays a rejection with AEAT\'s error code', function (): void {
     $invoice->sendToVerifactu();
     Verifactu::decide($invoice, InvoiceStatus::Rejected, errorCode: '1105', errorMessage: 'El NIF no está identificado.');
 
-    Event::assertDispatched(InvoiceRejected::class, fn (InvoiceRejected $event): bool => $event->errorCode === '1105'
+    Event::assertDispatched(fn (InvoiceRejected $event): bool => $event->errorCode === '1105'
         && $event->errorMessage === 'El NIF no está identificado.');
     expect($invoice->fresh()->aeat_status)->toBe(InvoiceStatus::Rejected);
 });
@@ -116,7 +116,7 @@ it('completes a batch at once and applies it', function (): void {
     expect($invoices->fresh()->pluck('number')->all())->toBe(['FACT-2026-00001', 'FACT-2026-00002', 'FACT-2026-00003'])
         ->and(InvoiceBatch::sole()->status)->toBe(InvoiceBatchStatus::Completed);
     Event::assertDispatchedTimes(InvoiceIssued::class, 3);
-    Event::assertDispatched(InvoiceBatchCompleted::class, fn (InvoiceBatchCompleted $event): bool => $event->succeeded === 3);
+    Event::assertDispatched(fn (InvoiceBatchCompleted $event): bool => $event->succeeded === 3);
 });
 
 it('stores the invoice already issued when it is sent again', function (): void {
@@ -176,9 +176,9 @@ it('answers tax-ID checks as the test sets: :dataset', function (Closure $settin
 
     expect(checkCustomer())->toBe($errors);
 })->with([
-    'identified, the default' => [fn (VerifactuFake $fake) => $fake, []],
-    'not identified' => [fn (VerifactuFake $fake) => $fake->taxIdCheck(TaxIdCheckResult::NotIdentified), ['tax_id' => ['AEAT does not accept this tax ID with this name.']]],
-    'similar' => [fn (VerifactuFake $fake) => $fake->taxIdCheck(TaxIdCheckResult::Similar, 'ACME SOCIEDAD LIMITADA'), ['legal_name' => ['AEAT holds this tax ID as: ACME SOCIEDAD LIMITADA']]],
+    'identified, the default' => [fn (VerifactuFake $fake): VerifactuFake => $fake, []],
+    'not identified' => [fn (VerifactuFake $fake): VerifactuFake => $fake->taxIdCheck(TaxIdCheckResult::NotIdentified), ['tax_id' => ['AEAT does not accept this tax ID with this name.']]],
+    'similar' => [fn (VerifactuFake $fake): VerifactuFake => $fake->taxIdCheck(TaxIdCheckResult::Similar, 'ACME SOCIEDAD LIMITADA'), ['legal_name' => ['AEAT holds this tax ID as: ACME SOCIEDAD LIMITADA']]],
 ]);
 
 it('keeps the tax-ID answer for every later check', function (): void {
@@ -189,7 +189,7 @@ it('keeps the tax-ID answer for every later check', function (): void {
 });
 
 it('refuses a similar answer without the official name', function (): void {
-    expect(fn () => Verifactu::fake()->taxIdCheck(TaxIdCheckResult::Similar))
+    expect(fn (): VerifactuFake => Verifactu::fake()->taxIdCheck(TaxIdCheckResult::Similar))
         ->toThrow(LogicException::class, 'Give the official name AEAT holds with a Similar answer.');
 });
 
@@ -307,27 +307,27 @@ it('fails :dataset with a clear message', function (Closure $assertion, Closure 
 })->with([
     'assertIssued' => [
         fn (Invoice $invoice) => Verifactu::assertIssued($invoice),
-        fn (Invoice $invoice) => "Verifactu did not issue the invoice [invoice:{$invoice->id}].",
+        fn (Invoice $invoice): string => "Verifactu did not issue the invoice [invoice:{$invoice->id}].",
     ],
     'assertIssued with a callback' => [
         fn (Invoice $invoice, Invoice $issued) => Verifactu::assertIssued($issued, fn (array $body): bool => false),
-        fn (Invoice $invoice, Invoice $issued) => "Verifactu issued the invoice [invoice:{$issued->id}], but not as the callback expects.",
+        fn (Invoice $invoice, Invoice $issued): string => "Verifactu issued the invoice [invoice:{$issued->id}], but not as the callback expects.",
     ],
     'assertNothingIssued' => [
         fn () => Verifactu::assertNothingIssued(),
-        fn (Invoice $invoice, Invoice $issued) => "Verifactu issued invoices unexpectedly: [invoice:{$issued->id}].",
+        fn (Invoice $invoice, Invoice $issued): string => "Verifactu issued invoices unexpectedly: [invoice:{$issued->id}].",
     ],
     'assertBatchSent' => [
         fn () => Verifactu::assertBatchSent(),
-        fn () => 'No batch was sent to Verifactu.',
+        fn (): string => 'No batch was sent to Verifactu.',
     ],
     'assertCorrected' => [
         fn (Invoice $invoice, Invoice $issued) => Verifactu::assertCorrected($issued),
-        fn (Invoice $invoice, Invoice $issued) => "The invoice [invoice:{$issued->id}] was not corrected on Verifactu.",
+        fn (Invoice $invoice, Invoice $issued): string => "The invoice [invoice:{$issued->id}] was not corrected on Verifactu.",
     ],
     'assertCancelled' => [
         fn (Invoice $invoice, Invoice $issued) => Verifactu::assertCancelled($issued),
-        fn (Invoice $invoice, Invoice $issued) => "The invoice [invoice:{$issued->id}] was not cancelled on Verifactu.",
+        fn (Invoice $invoice, Invoice $issued): string => "The invoice [invoice:{$issued->id}] was not cancelled on Verifactu.",
     ],
 ]);
 
@@ -345,10 +345,12 @@ it('refuses to issue to a customer AEAT does not know, as the service does', fun
 
     // On the sync queue, the job's failure reaches the caller once failed() has run.
     expect(fn () => $invoice->sendToVerifactu())
-        ->toThrow(fn (VerifactuException $exception) => expect($exception->errorCode)->toBe('recipient_not_identified'));
+        ->toThrow(function (VerifactuException $exception): void {
+            expect($exception->errorCode)->toBe('recipient_not_identified');
+        });
 
     Verifactu::assertNothingIssued();
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->errorCode === 'recipient_not_identified');
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->errorCode === 'recipient_not_identified');
 });
 
 it('fails the batch item to a customer AEAT does not know and issues the others', function (): void {
@@ -362,7 +364,7 @@ it('fails the batch item to a customer AEAT does not know and issues the others'
     Verifactu::assertIssued($simplified);
     expect($toCustomer->fresh()->verifactu_uuid)->toBeNull()
         ->and(InvoiceBatch::sole()->status)->toBe(InvoiceBatchStatus::CompletedWithErrors);
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($toCustomer)
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($toCustomer)
         && $event->errorCode === 'recipient_not_identified');
 });
 
@@ -977,7 +979,7 @@ it('hands the service\'s refusal of an invoice the app described wrongly to Invo
 
     rescue(fn () => $invoice->sendToVerifactu(), report: false);
 
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice) && $event->errorCode === 'invalid_lines');
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice) && $event->errorCode === 'invalid_lines');
     Verifactu::assertNothingIssued();
 });
 
@@ -991,7 +993,7 @@ it('fails only the batch item the service refuses, and issues the others', funct
     Verifactu::assertIssued($first);
     Verifactu::assertIssued($last);
     Event::assertDispatchedTimes(InvoiceIssued::class, 2);
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($empty) && $event->errorCode === 'invalid_lines');
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($empty) && $event->errorCode === 'invalid_lines');
 });
 
 it('fails the batch item the service refuses, with the fields', function (): void {

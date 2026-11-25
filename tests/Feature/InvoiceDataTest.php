@@ -38,7 +38,7 @@ function withTwoDecimals(array $body): array
             return $value;
         }
 
-        return (new Number($value))->add(0, 2)->value;
+        return new Number($value)->add(0, 2)->value;
     }));
 }
 
@@ -61,15 +61,15 @@ $business = Recipient::spanish('A15022510', 'Nombre destinatario');
 it('builds the body of the service example :dataset', function (Closure $build, string $slug): void {
     expect($build()->toArray())->toEqual(serviceExample($slug));
 })->with([
-    'standard' => [fn () => InvoiceData::make('Factura normal')->to($business)->lines([TaxLine::vat(20000, rate: 21)]), 'standard'],
-    'vat-exempt' => [fn () => InvoiceData::make('Factura exenta de IVA')->to($business)->lines([TaxLine::exempt(20000)]), 'vat-exempt'],
-    'several-vat-rates' => [fn () => InvoiceData::make('Factura con varios IVAs')->to($business)->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'several-vat-rates'],
-    'simplified' => [fn () => InvoiceData::make('Factura simplificada')->simplified()->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'simplified'],
-    'simplified-credit-note' => [fn () => InvoiceData::make('Factura de canje, opción 1: abono de la simplificada')->simplified()->lines([TaxLine::vat(-20000, rate: 21)]), 'simplified-credit-note'],
-    'replaces-simplified' => [fn () => InvoiceData::make('Factura de canje, opción 2: sustitutiva (F3)')->to($business)->lines([TaxLine::vat(20000, rate: 21)])->replacing(issuedInvoice('1', '2026-10-02', simplified: true)), 'replaces-simplified'],
-    'credit-note' => [fn () => InvoiceData::make('Factura de abono')->to($business)->lines([TaxLine::vat(-20000, rate: 21)]), 'credit-note'],
-    'export-of-goods' => [fn () => InvoiceData::make('Factura extracomunitaria - Exportación de bienes')->to(Recipient::foreign('Nombre destinatario', 'US', ForeignIdType::Passport, 'M76543210'))->lines([TaxLine::exempt(20000, ExemptionReason::Exports)]), 'export-of-goods'],
-    'intra-eu-goods' => [fn () => InvoiceData::make('Factura B2B intracomunitaria - Venta de bienes')->to(Recipient::foreign('Nombre destinatario', 'BE', ForeignIdType::EuVatNumber, 'BE0404621642'))->lines([TaxLine::exempt(20000, ExemptionReason::IntraEuSupplies)]), 'intra-eu-goods'],
+    'standard' => [fn (): InvoiceData => InvoiceData::make('Factura normal')->to($business)->lines([TaxLine::vat(20000, rate: 21)]), 'standard'],
+    'vat-exempt' => [fn (): InvoiceData => InvoiceData::make('Factura exenta de IVA')->to($business)->lines([TaxLine::exempt(20000)]), 'vat-exempt'],
+    'several-vat-rates' => [fn (): InvoiceData => InvoiceData::make('Factura con varios IVAs')->to($business)->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'several-vat-rates'],
+    'simplified' => [fn (): InvoiceData => InvoiceData::make('Factura simplificada')->simplified()->lines([TaxLine::vat(20000, rate: 21), TaxLine::vat(10000, rate: 10)]), 'simplified'],
+    'simplified-credit-note' => [fn (): InvoiceData => InvoiceData::make('Factura de canje, opción 1: abono de la simplificada')->simplified()->lines([TaxLine::vat(-20000, rate: 21)]), 'simplified-credit-note'],
+    'replaces-simplified' => [fn (): InvoiceData => InvoiceData::make('Factura de canje, opción 2: sustitutiva (F3)')->to($business)->lines([TaxLine::vat(20000, rate: 21)])->replacing(issuedInvoice('1', '2026-10-02', simplified: true)), 'replaces-simplified'],
+    'credit-note' => [fn (): InvoiceData => InvoiceData::make('Factura de abono')->to($business)->lines([TaxLine::vat(-20000, rate: 21)]), 'credit-note'],
+    'export-of-goods' => [fn (): InvoiceData => InvoiceData::make('Factura extracomunitaria - Exportación de bienes')->to(Recipient::foreign('Nombre destinatario', 'US', ForeignIdType::Passport, 'M76543210'))->lines([TaxLine::exempt(20000, ExemptionReason::Exports)]), 'export-of-goods'],
+    'intra-eu-goods' => [fn (): InvoiceData => InvoiceData::make('Factura B2B intracomunitaria - Venta de bienes')->to(Recipient::foreign('Nombre destinatario', 'BE', ForeignIdType::EuVatNumber, 'BE0404621642'))->lines([TaxLine::exempt(20000, ExemptionReason::IntraEuSupplies)]), 'intra-eu-goods'],
 ]);
 
 it('builds the service example of a corrective invoice for the difference, as an R1', function (): void {
@@ -192,8 +192,8 @@ it('sends the recipient the app sets on a :dataset, for the service to judge', f
         ->invoice_type->toBe($type)
         ->recipient->toBe(['tax_id' => 'A15022510', 'name' => 'Acme']);
 })->with([
-    'simplified invoice' => [fn () => InvoiceData::make('Coffee')->to(Recipient::spanish('A15022510', 'Acme'))->simplified()->lines([TaxLine::vat(100, rate: 10)]), 'F2'],
-    'corrective invoice of a simplified one' => [fn () => InvoiceData::make('Refund')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(-1000, rate: 21)])->correcting(issuedInvoice('7', '2026-11-02', simplified: true)), 'R5'],
+    'simplified invoice' => [fn (): InvoiceData => InvoiceData::make('Coffee')->to(Recipient::spanish('A15022510', 'Acme'))->simplified()->lines([TaxLine::vat(100, rate: 10)]), 'F2'],
+    'corrective invoice of a simplified one' => [fn (): InvoiceData => InvoiceData::make('Refund')->to(Recipient::spanish('A15022510', 'Acme'))->lines([TaxLine::vat(-1000, rate: 21)])->correcting(issuedInvoice('7', '2026-11-02', simplified: true)), 'R5'],
 ]);
 
 it('sends a rate as given and groups only the same rate', function (): void {

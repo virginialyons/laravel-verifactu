@@ -73,7 +73,7 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
 
         $this->batch->update(['status' => $batch['status']]);
 
-        InvoiceBatchCompleted::dispatch($this->batch, $batch['total'], $batch['succeeded'], $batch['failed']);
+        event(new InvoiceBatchCompleted($this->batch, $batch['total'], $batch['succeeded'], $batch['failed']));
     }
 
     /**
@@ -114,7 +114,7 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
             if ($item['result'] === 'issued' && $item['invoice'] !== null) {
                 $invoice->storeVerifactuInvoice($item['invoice']);
 
-                InvoiceIssued::dispatch($invoice);
+                event(new InvoiceIssued($invoice));
 
                 continue;
             }
@@ -130,7 +130,7 @@ class ApplyInvoiceBatch implements ShouldBeUnique, ShouldQueue
                 continue;
             }
 
-            InvoiceNotIssued::dispatch($invoice, $item['error']['code'], $item['error']['message']);
+            event(new InvoiceNotIssued($invoice, $item['error']['code'], $item['error']['message']));
         }
     }
 

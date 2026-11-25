@@ -25,8 +25,8 @@ const BatchUuid = '5f0c6a2e-8a5b-4c1e-9d7a-2b8e4f6a1c3d';
 
 function applyBatchJob(InvoiceBatch $batch): ApplyInvoiceBatch
 {
-    $job = (new ApplyInvoiceBatch($batch->fresh()))->withFakeQueueInteractions();
-    $job->handle(app(Client::class));
+    $job = new ApplyInvoiceBatch($batch->fresh())->withFakeQueueInteractions();
+    $job->handle(resolve(Client::class));
 
     return $job;
 }
@@ -98,10 +98,10 @@ it('applies a batch of 150 from two pages: 149 issued and stored, 1 failed, each
         ->and($batch->fresh()->status)->toBe(InvoiceBatchStatus::CompletedWithErrors);
     Event::assertDispatchedTimes(InvoiceIssued::class, 149);
     Event::assertDispatchedTimes(InvoiceNotIssued::class, 1);
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[120])
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[120])
         && $event->errorCode === 'recipient_not_identified'
         && $event->message === 'Unknown customer.');
-    Event::assertDispatched(InvoiceBatchCompleted::class, fn (InvoiceBatchCompleted $event): bool => $event->batch->is($batch)
+    Event::assertDispatched(fn (InvoiceBatchCompleted $event): bool => $event->batch->is($batch)
         && [$event->total, $event->succeeded, $event->failed] === [150, 149, 1]);
 });
 
@@ -144,7 +144,7 @@ it('skips items of invoices it does not know or has already stored', function ()
     applyBatchJob($batch);
 
     Event::assertDispatchedTimes(InvoiceIssued::class, 1);
-    Event::assertDispatched(InvoiceIssued::class, fn (InvoiceIssued $event): bool => $event->invoice->is($invoices[1]));
+    Event::assertDispatched(fn (InvoiceIssued $event): bool => $event->invoice->is($invoices[1]));
     expect($invoices[0]->fresh()->verifactu_uuid)->toBeNull()
         ->and($alreadyStored->fresh()->number)->toBe('FACT-2026-00042');
 });
@@ -187,15 +187,15 @@ it('lets the batch be applied again once the lock of a lost job expires, after t
     $this->freezeSecond();
     Queue::fake([ApplyInvoiceBatch::class]);
     $batch = queuedBatch();
-    ApplyInvoiceBatch::dispatch($batch);
+    dispatch(new ApplyInvoiceBatch($batch));
 
     $this->travel(89999)->seconds();
-    ApplyInvoiceBatch::dispatch($batch);
+    dispatch(new ApplyInvoiceBatch($batch));
 
     Queue::assertPushedTimes(ApplyInvoiceBatch::class, 1);
 
     $this->travel(1)->second();
-    ApplyInvoiceBatch::dispatch($batch);
+    dispatch(new ApplyInvoiceBatch($batch));
 
     Queue::assertPushedTimes(ApplyInvoiceBatch::class, 2);
 });

@@ -60,9 +60,7 @@ class KnownToAeat implements DataAwareRule, ValidationRule
             }
 
             // Not an outage, such as a refused token: the form passes, and someone should know.
-            if ($exception->isNotRetryable()) {
-                report($exception);
-            }
+            report_if($exception->isNotRetryable(), $exception);
 
             return;
         }

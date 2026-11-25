@@ -44,7 +44,7 @@ class RefreshInvoice implements ShouldBeUniqueUntilProcessing, ShouldQueue
      */
     public function middleware(): array
     {
-        return [(new WithoutOverlapping($this->invoice->verifactuReference()))->releaseAfter(5)->expireAfter(60)];
+        return [new WithoutOverlapping($this->invoice->verifactuReference())->releaseAfter(5)->expireAfter(60)];
     }
 
     public function handle(Client $client): void

@@ -29,8 +29,8 @@ uses(RefreshDatabase::class);
  */
 function sendBatchJob(iterable $invoices): SendInvoiceBatch
 {
-    $job = (new SendInvoiceBatch(Collection::make($invoices)))->withFakeQueueInteractions();
-    $job->handle(app(Client::class));
+    $job = new SendInvoiceBatch(Collection::make($invoices))->withFakeQueueInteractions();
+    $job->handle(resolve(Client::class));
 
     return $job;
 }
@@ -77,12 +77,12 @@ it('keeps one Idempotency-Key across the retries of a send, and gives a later se
         ->push(['data' => serviceBatch()], 202)]);
 
     $job = sendBatchJob($invoices)->assertReleased(7);
-    $job->withFakeQueueInteractions()->handle(app(Client::class));
+    $job->withFakeQueueInteractions()->handle(resolve(Client::class));
 
     $keys = Http::recorded()->map(fn (array $pair): array => $pair[0]->header('Idempotency-Key'))->unique();
     expect($keys->all())->toBe([[$job->idempotencyKey]])
         ->and($job->idempotencyKey)->toStartWith('batch:')
-        ->and((new SendInvoiceBatch($invoices))->idempotencyKey)->not->toBe($job->idempotencyKey)
+        ->and(new SendInvoiceBatch($invoices)->idempotencyKey)->not->toBe($job->idempotencyKey)
         ->and(InvoiceBatch::count())->toBe(1);
 });
 
@@ -97,7 +97,7 @@ it('is released to store the batch on the retry when the database fails after th
     Exceptions::assertReported(QueryException::class);
 
     Schema::rename('batches_away', 'verifactu_invoice_batches');
-    $job->withFakeQueueInteractions()->handle(app(Client::class));
+    $job->withFakeQueueInteractions()->handle(resolve(Client::class));
 
     expect(InvoiceBatch::sole())->uuid->toBe(serviceBatch()['uuid'])->status->toBe(InvoiceBatchStatus::Queued);
     expect(Http::recorded()->map(fn (array $pair): array => $pair[0]->header('Idempotency-Key'))->unique()->all())->toBe([[$job->idempotencyKey]]);
@@ -133,7 +133,7 @@ it('reports as not issued only the invoices still not on Verifactu', function ()
     $job->failed(new VerifactuException('Refused.', 422, 'validation_failed'));
 
     Event::assertDispatchedTimes(InvoiceNotIssued::class, 1);
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1]));
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1]));
 });
 
 it('fails on a refusal and fires InvoiceNotIssued for each invoice', function (): void {
@@ -148,7 +148,7 @@ it('fails on a refusal and fires InvoiceNotIssued for each invoice', function ()
     expect(DB::table('failed_jobs')->count())->toBe(1)
         ->and(InvoiceBatch::count())->toBe(0);
     Event::assertDispatchedTimes(InvoiceNotIssued::class, 2);
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1])
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1])
         && $event->errorCode === 'validation_failed');
 });
 
@@ -156,10 +156,10 @@ it('fires InvoiceNotIssued without an error code when the job fails :dataset', f
     $invoices = Invoice::factory()->count(2)->create();
     Event::fake([InvoiceNotIssued::class]);
 
-    (new SendInvoiceBatch($invoices))->failed($exception);
+    new SendInvoiceBatch($invoices)->failed($exception);
 
     Event::assertDispatchedTimes(InvoiceNotIssued::class, 2);
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1])
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoices[1])
         && $event->errorCode === null
         && $event->message === $message);
 })->with([

@@ -131,7 +131,7 @@ class InvoiceData implements Arrayable
             $body['invoice_type'] = $this->type->value;
         }
 
-        if ($this->recipient !== null) {
+        if ($this->recipient instanceof Recipient) {
             $body['recipient'] = $this->recipient->toArray();
         }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vlec\Verifactu\Http\Controllers;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
@@ -46,7 +47,7 @@ class WebhookController
             return;
         }
 
-        ApplyInvoiceBatch::dispatch($batch);
+        dispatch(new ApplyInvoiceBatch($batch));
     }
 
     /**
@@ -63,6 +64,6 @@ class WebhookController
         $model::query()
             ->whereIn(config()->string('verifactu.columns.uuid'), $uuids)
             ->get()
-            ->each(fn (Model&VerifactuInvoice $invoice) => RefreshInvoice::dispatch($invoice));
+            ->each(fn (Model&VerifactuInvoice $invoice): PendingDispatch => dispatch(new RefreshInvoice($invoice)));
     }
 }

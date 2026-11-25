@@ -24,6 +24,7 @@ use PHPUnit\Framework\Assert as PHPUnit;
 use Psr\Http\Message\ResponseInterface;
 use Vlec\Verifactu\Client;
 use Vlec\Verifactu\Contracts\VerifactuInvoice;
+use Vlec\Verifactu\Environment;
 use Vlec\Verifactu\InvoiceStatus;
 use Vlec\Verifactu\Jobs\ApplyInvoiceBatch;
 use Vlec\Verifactu\Jobs\RefreshInvoice;
@@ -166,7 +167,7 @@ class VerifactuFake extends Client implements Fake
         $url = Str::finish(config()->string('verifactu.url'), '/');
 
         // Clones from withoutRetries() send to this closure, so the state stays on this instance.
-        Http::fake(["{$url}api/v1/*" => fn (Request $request): ?PromiseInterface => $this->answer($request)]);
+        Http::fake(["{$url}api/v1/*" => $this->answer(...)]);
     }
 
     /**
@@ -181,7 +182,7 @@ class VerifactuFake extends Client implements Fake
         /** @var array{uuid: string, status: string} $answer */
         $answer = parent::createInvoiceBatch($batch, $idempotencyKey);
 
-        ApplyInvoiceBatch::dispatch(InvoiceBatch::firstOrCreate(['uuid' => $answer['uuid']], ['status' => $answer['status']]));
+        dispatch(new ApplyInvoiceBatch(InvoiceBatch::firstOrCreate(['uuid' => $answer['uuid']], ['status' => $answer['status']])));
 
         return $answer;
     }
@@ -197,35 +198,23 @@ class VerifactuFake extends Client implements Fake
         $reference = $invoice->verifactuReference();
         $uuid = $this->uuidOf($invoice);
 
-        if ($uuid === null) {
-            throw new LogicException("The invoice [{$reference}] is not on the fake Verifactu: issue it first.");
-        }
+        throw_if($uuid === null, LogicException::class, "The invoice [{$reference}] is not on the fake Verifactu: issue it first.");
 
         $records = $this->records[$uuid];
-        $last = array_key_last($records);
+        $last = count($records) - 1;
         $record = $records[$last];
 
-        if ($record['status'] !== 'pending') {
-            throw new LogicException("Nothing of the invoice [{$reference}] awaits AEAT's answer: correct or cancel it first.");
-        }
+        throw_if($record['status'] !== 'pending', LogicException::class, "Nothing of the invoice [{$reference}] awaits AEAT's answer: correct or cancel it first.");
 
-        if ($status === InvoiceStatus::Pending) {
-            throw new LogicException('AEAT answers accepted, accepted with errors or rejected, or registers a cancellation: pending is no answer.');
-        }
+        throw_if($status === InvoiceStatus::Pending, LogicException::class, 'AEAT answers accepted, accepted with errors or rejected, or registers a cancellation: pending is no answer.');
 
         $cancellation = $record['type'] === 'cancellation';
 
-        if ($status === InvoiceStatus::Cancelled && ! $cancellation) {
-            throw new LogicException("No cancellation of the invoice [{$reference}] awaits AEAT's answer: cancel it first.");
-        }
+        throw_if($status === InvoiceStatus::Cancelled && ! $cancellation, LogicException::class, "No cancellation of the invoice [{$reference}] awaits AEAT's answer: cancel it first.");
 
-        if ($cancellation && $status !== InvoiceStatus::Cancelled && $status !== InvoiceStatus::Accepted) {
-            throw new LogicException("The cancellation of the invoice [{$reference}] awaits AEAT's answer: decide Cancelled.");
-        }
+        throw_if($cancellation && $status !== InvoiceStatus::Cancelled && $status !== InvoiceStatus::Accepted, LogicException::class, "The cancellation of the invoice [{$reference}] awaits AEAT's answer: decide Cancelled.");
 
-        if ($errorCode !== null && $status !== InvoiceStatus::AcceptedWithErrors && $status !== InvoiceStatus::Rejected) {
-            throw new LogicException('AEAT gives an error code only when it accepts a record with errors or rejects it.');
-        }
+        throw_if($errorCode !== null && $status !== InvoiceStatus::AcceptedWithErrors && $status !== InvoiceStatus::Rejected, LogicException::class, 'AEAT gives an error code only when it accepts a record with errors or rejects it.');
 
         $recordStatus = $status->value;
 
@@ -244,7 +233,7 @@ class VerifactuFake extends Client implements Fake
         $this->invoices[$uuid] = [...$this->invoices[$uuid], 'status' => $status->value, 'aeat' => $aeat];
         $this->records[$uuid][$last] = [...$record, 'status' => $recordStatus];
 
-        RefreshInvoice::dispatch($invoice);
+        dispatch(new RefreshInvoice($invoice));
 
         return $this;
     }
@@ -258,9 +247,7 @@ class VerifactuFake extends Client implements Fake
      */
     public function taxIdCheck(TaxIdCheckResult $result, ?string $officialName = null): static
     {
-        if ($result === TaxIdCheckResult::Similar && $officialName === null) {
-            throw new LogicException('Give the official name AEAT holds with a Similar answer.');
-        }
+        throw_if($result === TaxIdCheckResult::Similar && $officialName === null, LogicException::class, 'Give the official name AEAT holds with a Similar answer.');
 
         $this->taxIdCheck = new TaxIdCheck($result, $officialName);
 
@@ -280,7 +267,7 @@ class VerifactuFake extends Client implements Fake
 
         PHPUnit::assertNotNull($uuid, "Verifactu did not issue the invoice [{$reference}].");
 
-        if ($callback === null) {
+        if (! $callback instanceof Closure) {
             return;
         }
 
@@ -354,7 +341,7 @@ class VerifactuFake extends Client implements Fake
             return null;
         }
 
-        if ($this->environment() === null) {
+        if (! $this->environment() instanceof Environment) {
             return Http::response(['message' => 'Unauthenticated.'], 401);
         }
 

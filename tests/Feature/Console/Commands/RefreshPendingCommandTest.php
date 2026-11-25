@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Attributes\WithoutTimestamps;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
@@ -32,12 +34,9 @@ it('refreshes only the invoices pending for over an hour', function (): void {
 });
 
 it('refreshes every pending invoice of a model without timestamps', function (): void {
-    $model = new class extends Invoice
-    {
-        protected $table = 'invoices';
-
-        public $timestamps = false;
-    };
+    $model = new #[Table(name: 'invoices')]
+    #[WithoutTimestamps]
+    class extends Invoice {};
     config(['verifactu.model' => $model::class]);
     Invoice::factory()->issued()->create();
     Queue::fake([RefreshInvoice::class]);

@@ -78,9 +78,7 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
             $this->invoice->storeVerifactuInvoice($invoice);
         } catch (QueryException $exception) {
             // Saved, then a status listener failed: not the save's failure to retry.
-            if ($this->invoice->isClean()) {
-                throw $exception;
-            }
+            throw_if($this->invoice->isClean(), $exception);
 
             // The service issued it: the retry's same key replays the answer, to store it then.
             report($exception);
@@ -90,7 +88,7 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
             return;
         }
 
-        InvoiceIssued::dispatch($this->invoice);
+        event(new InvoiceIssued($this->invoice));
     }
 
     public function failed(?Throwable $exception): void
@@ -106,7 +104,7 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
             $errorCode = $exception->errorCode;
         }
 
-        InvoiceNotIssued::dispatch($this->invoice, $errorCode, $exception?->getMessage() ?? 'The job failed.');
+        event(new InvoiceNotIssued($this->invoice, $errorCode, $exception?->getMessage() ?? 'The job failed.'));
     }
 
     /**
@@ -117,16 +115,12 @@ class IssueInvoice implements ShouldBeUnique, ShouldQueue, ShouldQueueAfterCommi
         try {
             return $client->createInvoice($this->invoice->toVerifactuRequest(), $this->idempotencyKey);
         } catch (VerifactuException $exception) {
-            if (Collection::make(self::IssuedBeforeCodes)->doesntContainStrict($exception->errorCode)) {
-                throw $exception;
-            }
+            throw_if(Collection::make(self::IssuedBeforeCodes)->doesntContainStrict($exception->errorCode), $exception);
 
             $found = $client->listInvoices(['filter' => ['external_reference' => $this->invoice->verifactuReference()]]);
 
             // The service holds no invoice for the sale: the refusal stands.
-            if (blank(Arr::get($found, 'data'))) {
-                throw $exception;
-            }
+            throw_if(blank(Arr::get($found, 'data')), $exception);
 
             return $client->getInvoice(Arr::string($found, 'data.0.uuid'));
         }

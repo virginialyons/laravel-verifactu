@@ -45,11 +45,11 @@ class TaxLine implements Arrayable
      */
     public function taxCents(): int
     {
-        if ($this->rate === null) {
+        if (! $this->rate instanceof Number) {
             return 0;
         }
 
-        return (int) (new Number($this->baseCents))
+        return (int) new Number($this->baseCents)
             ->mul($this->rate)
             ->div(100)
             ->round(0, RoundingMode::HalfAwayFromZero)
@@ -66,7 +66,7 @@ class TaxLine implements Arrayable
      */
     public function groupKey(): string
     {
-        if ($this->exemptionReason !== null) {
+        if ($this->exemptionReason instanceof ExemptionReason) {
             return "exempt:{$this->exemptionReason->value}";
         }
 
@@ -88,7 +88,7 @@ class TaxLine implements Arrayable
     {
         $base = self::decimal($this->baseCents);
 
-        if ($this->exemptionReason !== null) {
+        if ($this->exemptionReason instanceof ExemptionReason) {
             return Arr::whereNotNull([
                 'tax_base' => $base,
                 'regime_key' => $this->exemptionReason->regimeKey(),
@@ -109,6 +109,6 @@ class TaxLine implements Arrayable
      */
     public static function decimal(int $cents): string
     {
-        return (new Number($cents))->div(100, 2)->value;
+        return new Number($cents)->div(100, 2)->value;
     }
 }

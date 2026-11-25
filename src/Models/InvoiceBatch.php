@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Vlec\Verifactu\Models;
 
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
 use Vlec\Verifactu\InvoiceBatchStatus;
 
@@ -15,15 +17,13 @@ use Vlec\Verifactu\InvoiceBatchStatus;
  * @property string $uuid
  * @property InvoiceBatchStatus $status
  */
+#[Fillable([
+    'uuid',
+    'status',
+])]
+#[Table(name: 'verifactu_invoice_batches')]
 class InvoiceBatch extends Model
 {
-    protected $table = 'verifactu_invoice_batches';
-
-    protected $fillable = [
-        'uuid',
-        'status',
-    ];
-
     public function isApplied(): bool
     {
         return $this->status->isComplete();

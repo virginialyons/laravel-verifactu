@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
@@ -89,7 +90,7 @@ it('gives a rejection AEAT\'s error', function (): void {
         'aeat' => ['verification_code' => null, 'error_code' => '1105', 'error_message' => 'NIF no identificado.', 'registered_at' => null],
     ]));
 
-    Event::assertDispatched(InvoiceRejected::class, fn (InvoiceRejected $event): bool => $event->invoice->is($invoice)
+    Event::assertDispatched(fn (InvoiceRejected $event): bool => $event->invoice->is($invoice)
         && $event->errorCode === '1105'
         && $event->errorMessage === 'NIF no identificado.');
 });
@@ -157,7 +158,9 @@ it('throws the service\'s refusal of a fix or a cancellation and stores nothing'
     Http::fake(["verifactu.test/api/v1/invoices/uuid-1/{$path}" => Http::response(['message' => 'Refused.', 'code' => $code], $status)]);
 
     expect(fn () => $call($invoice))
-        ->toThrow(fn (VerifactuException $exception) => expect($exception->errorCode)->toBe($code));
+        ->toThrow(function (VerifactuException $exception) use ($code): void {
+            expect($exception->errorCode)->toBe($code);
+        });
     expect($invoice->fresh()->aeat_status)->toBe(InvoiceStatus::Accepted);
 })->with([
     'correction awaiting AEAT' => [fn (Invoice $invoice) => $invoice->correctOnVerifactu(), 'corrections', 409, 'invoice_awaiting_aeat'],
@@ -205,10 +208,8 @@ it('refers to the sale by the model\'s key', function (): void {
 });
 
 it('keeps the app\'s own cast of the issue-date column', function (): void {
-    $invoice = new class extends Invoice
+    $invoice = new #[Table(name: 'invoices')] class extends Invoice
     {
-        protected $table = 'invoices';
-
         protected function casts(): array
         {
             return [...parent::casts(), 'issued_on' => 'immutable_date'];

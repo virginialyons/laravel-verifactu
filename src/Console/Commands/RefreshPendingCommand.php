@@ -31,7 +31,7 @@ class RefreshPendingCommand extends Command
 
         // A batch stays queued until applied, even when its completion webhook came before it was stored.
         foreach (InvoiceBatch::query()->whereIn('status', [InvoiceBatchStatus::Queued, InvoiceBatchStatus::Processing])->lazyById() as $batch) {
-            ApplyInvoiceBatch::dispatch($batch);
+            dispatch(new ApplyInvoiceBatch($batch));
 
             $batches++;
         }
@@ -58,7 +58,7 @@ class RefreshPendingCommand extends Command
         $count = 0;
 
         foreach ($query->lazyById() as $invoice) {
-            RefreshInvoice::dispatch($invoice);
+            dispatch(new RefreshInvoice($invoice));
 
             $count++;
         }

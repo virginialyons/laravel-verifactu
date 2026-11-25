@@ -152,7 +152,9 @@ it('never retries a refusal: :dataset', function (int $status): void {
     Http::fake(['verifactu.test/api/v1/invoices/uuid-1' => Http::response(['message' => 'Refused.'], $status)]);
 
     expect(fn () => Verifactu::getInvoice('uuid-1'))
-        ->toThrow(fn (VerifactuException $exception) => expect($exception->isRetryable())->toBeFalse());
+        ->toThrow(function (VerifactuException $exception): void {
+            expect($exception->isRetryable())->toBeFalse();
+        });
     Http::assertSentCount(1);
 })->with([400, 404, 499]);
 
@@ -163,7 +165,9 @@ it('throws a 409 that needs a person at once', function (): void {
     ], 409)]);
 
     expect(fn () => Verifactu::cancelInvoice('uuid-1'))
-        ->toThrow(fn (VerifactuException $exception) => expect($exception->errorCode)->toBe('invoice_awaiting_aeat'));
+        ->toThrow(function (VerifactuException $exception): void {
+            expect($exception->errorCode)->toBe('invoice_awaiting_aeat');
+        });
     Http::assertSentCount(1);
 });
 

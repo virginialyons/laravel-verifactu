@@ -20,8 +20,8 @@ uses(RefreshDatabase::class);
 
 function refreshJob(Invoice $invoice): RefreshInvoice
 {
-    $job = (new RefreshInvoice($invoice))->withFakeQueueInteractions();
-    $job->handle(app(Client::class));
+    $job = new RefreshInvoice($invoice)->withFakeQueueInteractions();
+    $job->handle(resolve(Client::class));
 
     return $job;
 }
@@ -38,18 +38,18 @@ it('stores the invoice as the service has it and fires the event of its new stat
     refreshJob($invoice)->assertNotReleased();
 
     expect($invoice->fresh()->aeat_status)->toBe(InvoiceStatus::Rejected);
-    Event::assertDispatched(InvoiceRejected::class, fn (InvoiceRejected $event): bool => $event->invoice->is($invoice) && $event->errorCode === '1105');
+    Event::assertDispatched(fn (InvoiceRejected $event): bool => $event->invoice->is($invoice) && $event->errorCode === '1105');
 });
 
 it('fires no status event a read that ran meanwhile already fired', function (): void {
     $invoice = Invoice::factory()->issued()->create(['verifactu_uuid' => 'uuid-1']);
-    $job = (new RefreshInvoice($invoice))->withFakeQueueInteractions();
+    $job = new RefreshInvoice($invoice)->withFakeQueueInteractions();
     // Another worker's read stored the decision after this job loaded the invoice.
     Invoice::whereKey($invoice->id)->update(['aeat_status' => 'rejected']);
     Event::fake([InvoiceRejected::class]);
     Http::fake(['verifactu.test/api/v1/invoices/uuid-1' => Http::response(['data' => serviceInvoice(['uuid' => 'uuid-1', 'status' => 'rejected'])])]);
 
-    $job->handle(app(Client::class));
+    $job->handle(resolve(Client::class));
 
     Event::assertNotDispatched(InvoiceRejected::class);
 });
@@ -74,10 +74,10 @@ it('fails on a refusal', function (): void {
 it('waits longer before each later attempt when the service gives no Retry-After', function (): void {
     $invoice = Invoice::factory()->issued()->create();
     Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => Http::response(['message' => 'Error.'], 500)]);
-    $job = (new RefreshInvoice($invoice))->withFakeQueueInteractions();
+    $job = new RefreshInvoice($invoice)->withFakeQueueInteractions();
     $job->job->attempts = 3;
 
-    $job->handle(app(Client::class));
+    $job->handle(resolve(Client::class));
 
     $job->assertReleased(60);
 });
@@ -87,7 +87,7 @@ it('waits five seconds for a read of the same invoice running on another worker'
     $this->freezeSecond();
     $invoice = Invoice::factory()->issued()->create();
     $job = new RefreshInvoice($invoice);
-    Cache::lock((new WithoutOverlapping($invoice->verifactuReference()))->getLockKey($job), 60)->get();
+    Cache::lock(new WithoutOverlapping($invoice->verifactuReference())->getLockKey($job), 60)->get();
 
     Http::fake();
 
@@ -102,7 +102,7 @@ it('lets another read of the invoice run a minute after a worker died reading it
     $this->freezeSecond();
     $invoice = Invoice::factory()->issued()->create();
     $job = new RefreshInvoice($invoice);
-    $lock = (new WithoutOverlapping($invoice->verifactuReference()))->getLockKey($job);
+    $lock = new WithoutOverlapping($invoice->verifactuReference())->getLockKey($job);
     $taken = [];
     Http::fake(["verifactu.test/api/v1/invoices/{$invoice->verifactu_uuid}" => function () use ($invoice, $lock, &$taken) {
         // The lock this read holds, as a worker killed now would leave it.
@@ -123,15 +123,15 @@ it('lets the invoice be read again once the lock of a job lost while queued expi
     $this->freezeSecond();
     Queue::fake([RefreshInvoice::class]);
     $invoice = Invoice::factory()->issued()->create();
-    RefreshInvoice::dispatch($invoice);
+    dispatch(new RefreshInvoice($invoice));
 
     $this->travel(3599)->seconds();
-    RefreshInvoice::dispatch($invoice);
+    dispatch(new RefreshInvoice($invoice));
 
     Queue::assertPushedTimes(RefreshInvoice::class, 1);
 
     $this->travel(1)->second();
-    RefreshInvoice::dispatch($invoice);
+    dispatch(new RefreshInvoice($invoice));
 
     Queue::assertPushedTimes(RefreshInvoice::class, 2);
 });

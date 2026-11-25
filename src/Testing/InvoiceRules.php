@@ -191,7 +191,7 @@ class InvoiceRules
         $total = Arr::string($body, 'total_amount');
 
         // The amount rule has checked the total; is_numeric() tells PHPStan so.
-        if ($type === 'F2' && is_numeric($total) && (new Number($total))->compare(self::SimplifiedInvoiceLimit) > 0) {
+        if ($type === 'F2' && is_numeric($total) && new Number($total)->compare(self::SimplifiedInvoiceLimit) > 0) {
             return self::error('simplified_invoice_over_limit', 'total_amount', 'A simplified invoice (F2) cannot exceed 3,000.00.');
         }
 

@@ -20,19 +20,21 @@
     "require": {
         "php": "^8.4",
         "ext-bcmath": "*",
-        "laravel/framework": "^13.0",
+        "laravel/framework": "^13.44",
         "laravel/prompts": "^0.3"
     },
     "require-dev": {
+        "driftingly/rector-laravel": "^2.7",
         "larastan/larastan": "^3.9",
         "laravel/pao": "^1.0",
         "laravel/pint": "^1.29",
-        "orchestra/testbench": "^11.0",
+        "orchestra/testbench": "^11.3",
         "pestphp/pest": "^5.0",
         "pestphp/pest-plugin-laravel": "^5.0",
         "pestphp/pest-plugin-type-coverage": "^5.0",
         "phpstan/extension-installer": "^1.4",
-        "phpstan/phpstan-deprecation-rules": "^2.0"
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "rector/rector": "^2.9"
     },
     "autoload": {
         "psr-4": {
@@ -63,7 +65,14 @@
             "@build",
             "@php vendor/bin/testbench serve --ansi"
         ],
+        "rector": [
+            "vendor/bin/rector --no-progress-bar"
+        ],
+        "rector:check": [
+            "vendor/bin/rector --dry-run --no-progress-bar"
+        ],
         "lint": [
+            "@rector",
             "vendor/bin/pint --parallel"
         ],
         "lint:check": [
@@ -83,6 +92,7 @@
         ],
         "test": [
             "@analyse",
+            "@rector:check",
             "@lint:check",
             "@test:types",
             "@test:unit"

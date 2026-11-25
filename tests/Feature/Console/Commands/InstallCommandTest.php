@@ -30,7 +30,7 @@ beforeEach(function (): void {
 
     // The app's models are the fixtures': app/Models and the app's namespace point there.
     $this->app->useAppPath(join_paths(__DIR__, '..', '..', '..', 'Fixtures', 'App'));
-    (fn () => $this->namespace = 'Vlec\\Verifactu\\Tests\\Fixtures\\App\\')->call($this->app);
+    (fn (): string => $this->namespace = 'Vlec\\Verifactu\\Tests\\Fixtures\\App\\')->call($this->app);
 
     // Booted again, the provider publishes into the folder.
     $this->app->register(VerifactuServiceProvider::class, force: true);

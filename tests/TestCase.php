@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Vlec\Verifactu\Tests;
 
+use Illuminate\Contracts\Config\Repository;
 use Illuminate\Support\Facades\Http;
 use Orchestra\Testbench\Concerns\WithWorkbench;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -33,9 +34,11 @@ abstract class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
-        $app['config']->set('verifactu.url', 'https://verifactu.test');
-        $app['config']->set('verifactu.token', 'vf_test_token-for-tests');
-        $app['config']->set('verifactu.webhook_secret', 'whsec_secret-for-tests');
-        $app['config']->set('queue.failed.database', 'testing');
+        $app->make(Repository::class)->set([
+            'verifactu.url' => 'https://verifactu.test',
+            'verifactu.token' => 'vf_test_token-for-tests',
+            'verifactu.webhook_secret' => 'whsec_secret-for-tests',
+            'queue.failed.database' => 'testing',
+        ]);
     }
 }

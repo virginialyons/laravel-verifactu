@@ -26,14 +26,10 @@ class VerifyWebhookSignature
         $secret = config('verifactu.webhook_secret');
 
         // A server error, so the service keeps retrying the delivery until the secret is set.
-        if (! is_string($secret) || blank($secret)) {
-            throw new RuntimeException('Set VERIFACTU_WEBHOOK_SECRET to the webhook secret of the app on the Verifactu service.');
-        }
+        throw_if(! is_string($secret) || blank($secret), RuntimeException::class, 'Set VERIFACTU_WEBHOOK_SECRET to the webhook secret of the app on the Verifactu service.');
 
         // A 403 is final: the service does not send the delivery again.
-        if ($this->signatureIsInvalid($request->getContent(), (string) $request->headers->get('X-Webhook-Signature'), $secret)) {
-            abort(Response::HTTP_FORBIDDEN, 'Invalid Verifactu webhook signature.');
-        }
+        abort_if($this->signatureIsInvalid($request->getContent(), (string) $request->headers->get('X-Webhook-Signature'), $secret), Response::HTTP_FORBIDDEN, 'Invalid Verifactu webhook signature.');
 
         /** @var Response */
         return $next($request);

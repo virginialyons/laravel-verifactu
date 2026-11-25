@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Workbench\Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 use Workbench\App\Models\Invoice;
 
 /**
@@ -32,7 +33,7 @@ class InvoiceFactory extends Factory
         return $this->state([
             'verifactu_uuid' => fake()->uuid(),
             'aeat_status' => 'pending',
-            'number' => sprintf('FACT-%s-%05d', substr($issueDate, 0, 4), $number),
+            'number' => sprintf('FACT-%s-%05d', Str::substr($issueDate, 0, 4), $number),
             'short_number' => $number,
             'issued_on' => $issueDate,
         ]);

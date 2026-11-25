@@ -39,9 +39,7 @@ trait RetriesThroughTheQueue
      */
     protected function releaseOrFail(VerifactuException $exception): void
     {
-        if ($exception->isNotRetryable()) {
-            throw $exception;
-        }
+        throw_if($exception->isNotRetryable(), $exception);
 
         $this->release($exception->retryAfter ?? $this->releaseDelay());
     }

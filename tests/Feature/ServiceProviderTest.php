@@ -14,7 +14,7 @@ use Vlec\Verifactu\VerifactuServiceProvider;
 use Workbench\App\Models\Invoice;
 
 it('binds the client as a singleton', function (): void {
-    expect(app(Client::class))->toBe(app(Client::class));
+    expect(resolve(Client::class))->toBe(resolve(Client::class));
 });
 
 it('publishes the config under the verifactu-config tag', function (): void {
@@ -33,7 +33,7 @@ it('shows the environment the token works in on about', function (string $token,
     $this->artisan('about', ['--only' => 'verifactu'])
         ->expectsOutputToContain($environment)
         ->expectsOutputToContain('https://verifactu.test')
-        ->expectsOutputToContain('Workbench\App\Models\Invoice')
+        ->expectsOutputToContain(Invoice::class)
         ->expectsOutputToContain('verifactu/webhook')
         ->assertSuccessful();
 })->with([
@@ -58,7 +58,7 @@ it('runs its other jobs on the configured queue too: :dataset', function (Closur
 
     Queue::assertPushedOn('invoices', $job::class);
 })->with([
-    'RefreshInvoice' => [fn () => new RefreshInvoice(Invoice::factory()->make(['id' => 1]))],
-    'SendInvoiceBatch' => [fn () => new SendInvoiceBatch(Collection::make([Invoice::factory()->make(['id' => 1])]))],
-    'ApplyInvoiceBatch' => [fn () => new ApplyInvoiceBatch(new InvoiceBatch(['uuid' => 'a-batch']))],
+    'RefreshInvoice' => [fn (): RefreshInvoice => new RefreshInvoice(Invoice::factory()->make(['id' => 1]))],
+    'SendInvoiceBatch' => [fn (): SendInvoiceBatch => new SendInvoiceBatch(Collection::make([Invoice::factory()->make(['id' => 1])]))],
+    'ApplyInvoiceBatch' => [fn (): ApplyInvoiceBatch => new ApplyInvoiceBatch(new InvoiceBatch(['uuid' => 'a-batch']))],
 ]);

@@ -85,7 +85,7 @@ class SendInvoiceBatch implements ShouldQueue, ShouldQueueAfterCommit
                 continue;
             }
 
-            InvoiceNotIssued::dispatch($invoice, $errorCode, $exception?->getMessage() ?? 'The job failed.');
+            event(new InvoiceNotIssued($invoice, $errorCode, $exception?->getMessage() ?? 'The job failed.'));
         }
     }
 }

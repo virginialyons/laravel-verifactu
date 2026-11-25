@@ -25,12 +25,12 @@ uses(RefreshDatabase::class);
 
 function issueJob(Invoice $invoice): IssueInvoice
 {
-    return runJob((new IssueInvoice($invoice))->withFakeQueueInteractions());
+    return runJob(new IssueInvoice($invoice)->withFakeQueueInteractions());
 }
 
 function runJob(IssueInvoice $job): IssueInvoice
 {
-    $job->handle(app(Client::class));
+    $job->handle(resolve(Client::class));
 
     return $job;
 }
@@ -70,7 +70,7 @@ it('stores a 201 and fires InvoiceIssued, sending the reference and its key', fu
     Http::assertSent(fn (Request $request): bool => $request->header('Idempotency-Key') === [$job->idempotencyKey]
         && $request['external_reference'] === "invoice:{$invoice->id}");
     expect($invoice->fresh()->verifactu_uuid)->toBe('9d2c4b1e-0f6a-4c1b-9a59-6f1f2b3c4d5e');
-    Event::assertDispatched(InvoiceIssued::class, fn (InvoiceIssued $event): bool => $event->invoice->is($invoice));
+    Event::assertDispatched(fn (InvoiceIssued $event): bool => $event->invoice->is($invoice));
 });
 
 it('stores the invoice already issued for the reference on a 409 external_reference_already_used', function (): void {
@@ -144,21 +144,23 @@ it('keeps the refusal when the service holds no invoice for the sale', function 
         'verifactu.test/api/v1/invoices?*' => Http::response(['data' => [], 'links' => [], 'meta' => []]),
     ]);
 
-    expect(fn () => issueJob($invoice))
-        ->toThrow(fn (VerifactuException $exception) => expect($exception->errorCode)->toBe('idempotency_key_reused'));
+    expect(fn (): IssueInvoice => issueJob($invoice))
+        ->toThrow(function (VerifactuException $exception): void {
+            expect($exception->errorCode)->toBe('idempotency_key_reused');
+        });
     expect($invoice->fresh()->verifactu_uuid)->toBeNull();
 });
 
 it('fails, not retries, when a status listener breaks after the invoice was stored', function (): void {
     $invoice = Invoice::factory()->create();
-    Event::listen(InvoiceAccepted::class, fn () => throw new QueryException('testing', 'insert into emails', [], new Exception('Lost connection.')));
+    Event::listen(InvoiceAccepted::class, fn (): never => throw new QueryException('testing', 'insert into emails', [], new Exception('Lost connection.')));
     Http::fake([
         'verifactu.test/api/v1/invoices' => Http::response(['message' => 'Used.', 'code' => 'external_reference_already_used'], 409),
         'verifactu.test/api/v1/invoices?*' => Http::response(['data' => [serviceInvoice(['uuid' => 'uuid-1'])], 'links' => [], 'meta' => []]),
         'verifactu.test/api/v1/invoices/uuid-1' => Http::response(['data' => serviceInvoice(['uuid' => 'uuid-1', 'status' => 'accepted'])]),
     ]);
 
-    expect(fn () => issueJob($invoice))->toThrow(QueryException::class);
+    expect(fn (): IssueInvoice => issueJob($invoice))->toThrow(QueryException::class);
     expect($invoice->fresh()->verifactu_uuid)->toBe('uuid-1');
 });
 
@@ -199,16 +201,16 @@ it('runs where the app routes it, over the configured queue', function (): void 
 it('gives a later send a new Idempotency-Key, so a fixed refusal is sent again', function (): void {
     $invoice = Invoice::factory()->create();
 
-    expect((new IssueInvoice($invoice))->idempotencyKey)->not->toBe((new IssueInvoice($invoice))->idempotencyKey);
+    expect(new IssueInvoice($invoice)->idempotencyKey)->not->toBe(new IssueInvoice($invoice)->idempotencyKey);
 });
 
 it('waits longer before each later attempt, up to five minutes: attempt :dataset', function (int $attempt, int $delay): void {
     $invoice = Invoice::factory()->create();
     Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['message' => 'Error.'], 500)]);
-    $job = (new IssueInvoice($invoice))->withFakeQueueInteractions();
+    $job = new IssueInvoice($invoice)->withFakeQueueInteractions();
     $job->job->attempts = $attempt;
 
-    $job->handle(app(Client::class));
+    $job->handle(resolve(Client::class));
 
     $job->assertReleased($delay);
 })->with([
@@ -242,7 +244,7 @@ it('fails on any other refusal and fires InvoiceNotIssued', function (): void {
     expect(DB::table('failed_jobs')->count())->toBe(1)
         ->and(DB::table('jobs')->count())->toBe(0)
         ->and($invoice->fresh()->verifactu_uuid)->toBeNull();
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice)
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice)
         && $event->errorCode === 'recipient_not_identified'
         && $event->message === 'Unknown customer.');
 });
@@ -250,7 +252,7 @@ it('fails on any other refusal and fires InvoiceNotIssued', function (): void {
 it('does not report an issued invoice as not issued when a listener fails', function (): void {
     config(['queue.default' => 'database']);
     $invoice = Invoice::factory()->create();
-    Event::listen(InvoiceIssued::class, fn () => throw new RuntimeException('The mail server is down.'));
+    Event::listen(InvoiceIssued::class, fn (): never => throw new RuntimeException('The mail server is down.'));
     Event::fake([InvoiceNotIssued::class]);
     Http::fake(['verifactu.test/api/v1/invoices' => Http::response(['data' => serviceInvoice()], 201)]);
 
@@ -267,9 +269,9 @@ it('fires InvoiceNotIssued without an error code when the job fails :dataset', f
     $invoice = Invoice::factory()->create();
     Event::fake([InvoiceNotIssued::class]);
 
-    (new IssueInvoice($invoice))->failed($exception);
+    new IssueInvoice($invoice)->failed($exception);
 
-    Event::assertDispatched(InvoiceNotIssued::class, fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice)
+    Event::assertDispatched(fn (InvoiceNotIssued $event): bool => $event->invoice->is($invoice)
         && $event->errorCode === null
         && $event->message === $message);
 })->with([

@@ -37,7 +37,7 @@ trait IssuesVerifactuInvoices
      */
     public function sendToVerifactu(): void
     {
-        IssueInvoice::dispatch($this);
+        dispatch(new IssueInvoice($this));
     }
 
     /**
@@ -82,9 +82,7 @@ trait IssuesVerifactuInvoices
     {
         $key = $this->getKey();
 
-        if (! is_int($key) && ! is_string($key)) {
-            throw new LogicException('Save the invoice before sending it to Verifactu.');
-        }
+        throw_if(! is_int($key) && ! is_string($key), LogicException::class, 'Save the invoice before sending it to Verifactu.');
 
         return "invoice:{$key}";
     }
@@ -122,10 +120,10 @@ trait IssuesVerifactuInvoices
         $aeat = $invoice['aeat'] ?? [];
 
         match ($status) {
-            InvoiceStatus::Accepted => InvoiceAccepted::dispatch($this),
-            InvoiceStatus::AcceptedWithErrors => InvoiceAcceptedWithErrors::dispatch($this, $aeat['error_code'] ?? null, $aeat['error_message'] ?? null),
-            InvoiceStatus::Rejected => InvoiceRejected::dispatch($this, $aeat['error_code'] ?? null, $aeat['error_message'] ?? null),
-            InvoiceStatus::Cancelled => InvoiceCancelled::dispatch($this),
+            InvoiceStatus::Accepted => event(new InvoiceAccepted($this)),
+            InvoiceStatus::AcceptedWithErrors => event(new InvoiceAcceptedWithErrors($this, $aeat['error_code'] ?? null, $aeat['error_message'] ?? null)),
+            InvoiceStatus::Rejected => event(new InvoiceRejected($this, $aeat['error_code'] ?? null, $aeat['error_message'] ?? null)),
+            InvoiceStatus::Cancelled => event(new InvoiceCancelled($this)),
             default => null,
         };
     }
@@ -134,9 +132,7 @@ trait IssuesVerifactuInvoices
     {
         $uuid = $this->getAttribute(static::verifactuColumn('uuid'));
 
-        if (! is_string($uuid)) {
-            throw new LogicException('The invoice is not on Verifactu yet: send it with sendToVerifactu() first.');
-        }
+        throw_unless(is_string($uuid), LogicException::class, 'The invoice is not on Verifactu yet: send it with sendToVerifactu() first.');
 
         return $uuid;
     }

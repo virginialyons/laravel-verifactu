@@ -10,12 +10,12 @@ metadata:
 
 ## Primary Goal
 
-Keep package code, dependencies, and workflows compatible with the supported matrix: PHP ^8.4 (8.4 and 8.5) and Laravel ^13 with Testbench 11, on Ubuntu (Decisions 2 and 3 of the 0.1.0 plan). Widen it only when an app needs it.
+Keep package code, dependencies, and workflows compatible with the supported matrix: PHP ^8.4 (8.4 and 8.5) and the latest Laravel 13 with Testbench 11, on Ubuntu (0.1.0 plan Decisions 2 and 3; 0.2.0 plan Decision 2). The package is for the company's own apps, which update with it: when a Laravel feature needs a newer release, raise the floor in `composer.json` and use it.
 
 ## Workflow
 
 1. Read `composer.json` first to determine PHP, Laravel, and Testbench constraints.
-2. Check changed code against the lowest Laravel 13 release the constraints allow (`v13.0.0`) and PHP 8.4 syntax before adopting newer framework or language features.
+2. Check changed code against the lowest Laravel release `composer.json` allows and PHP 8.4 syntax. If a framework feature needs a newer release, raise the floor in the same change.
 3. Review `.github/workflows/tests.yml` (run by hand, `workflow_dispatch` only) for its prefer-lowest and prefer-stable lanes.
 4. When changing dependencies, confirm constraints still allow the intended Laravel and Testbench versions.
 5. Validate with the smallest local command available, then `composer test`, the gate; start the workflow by hand when a change is matrix-sensitive.
@@ -30,7 +30,7 @@ Keep package code, dependencies, and workflows compatible with the supported mat
 
 ## Examples
 
-- Review a new Laravel API call by checking whether it exists in Laravel `v13.0.0`, not only in the installed release.
+- Review a new Laravel API call by checking whether it exists in the floor `composer.json` names; if not, raise the floor.
 - Review a dependency bump by checking Composer constraints, Testbench constraints, and prefer-lowest behavior.
 
 ## Anti-Patterns
