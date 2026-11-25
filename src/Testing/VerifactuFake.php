@@ -148,14 +148,13 @@ class VerifactuFake extends Client implements Fake
     protected array $lastNumbers = [];
 
     /**
-     * AEAT's answer to every tax-ID check.
+     * AEAT's answer to every tax-ID check, as the test set it; null for the
+     * service's own answer.
      */
-    protected TaxIdCheck $taxIdCheck;
+    protected ?TaxIdCheck $taxIdCheck = null;
 
     public function __construct()
     {
-        $this->taxIdCheck = new TaxIdCheck(TaxIdCheckResult::Identified);
-
         if (blank(config('verifactu.url'))) {
             config(['verifactu.url' => 'https://verifactu.test']);
         }
@@ -243,7 +242,13 @@ class VerifactuFake extends Client implements Fake
      * NotIdentified to see the app refuse a customer. Similar takes the
      * official name AEAT holds. With NotIdentified, issuing or fixing an
      * invoice to a Spanish tax ID is refused with recipient_not_identified,
-     * as the service does, unless the body sets validate_recipient to false.
+     * as the service does in Live, unless the body sets validate_recipient
+     * to false.
+     *
+     * It plays the answer with any token. The service in Test checks
+     * nothing with AEAT: it answers NotChecked and never refuses a customer
+     * AEAT doesn't know, which is what the fake does with a vf_test_ token
+     * until this is called.
      */
     public function taxIdCheck(TaxIdCheckResult $result, ?string $officialName = null): static
     {
@@ -592,11 +597,31 @@ class VerifactuFake extends Client implements Fake
             return $this->refuse($this->invalid('invalid_recipient_name', 'name', 'The name is not text or is longer than 120 characters.'));
         }
 
+        $answer = $this->taxIdAnswer();
+
         return Http::response(['data' => [
             'tax_id' => $body['tax_id'],
-            'result' => $this->taxIdCheck->result->value,
-            'official_name' => $this->taxIdCheck->officialName,
+            'result' => $answer->result->value,
+            'official_name' => $answer->officialName,
         ]]);
+    }
+
+    /**
+     * AEAT's answer to a tax-ID check: the one the test set, or else the
+     * service's answer in the token's environment (NotChecked in Test, where
+     * AEAT has no checker; Identified in Live).
+     */
+    protected function taxIdAnswer(): TaxIdCheck
+    {
+        if ($this->taxIdCheck instanceof TaxIdCheck) {
+            return $this->taxIdCheck;
+        }
+
+        if ($this->environment() === Environment::Test) {
+            return new TaxIdCheck(TaxIdCheckResult::NotChecked);
+        }
+
+        return new TaxIdCheck(TaxIdCheckResult::Identified);
     }
 
     /**
@@ -788,7 +813,7 @@ class VerifactuFake extends Client implements Fake
      */
     protected function recipientRefusal(array $body): ?array
     {
-        if ($this->taxIdCheck->result !== TaxIdCheckResult::NotIdentified
+        if ($this->taxIdAnswer()->result !== TaxIdCheckResult::NotIdentified
             || ! is_string(Arr::get($body, 'recipient.tax_id'))
             || ($body['validate_recipient'] ?? true) === false) {
             return null;

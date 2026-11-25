@@ -30,6 +30,7 @@ php artisan migrate
 
 - The wizard publishes `config/verifactu.php`, adds `VERIFACTU_URL`, `VERIFACTU_TOKEN` and `VERIFACTU_WEBHOOK_SECRET` to `.env`, asks for the invoice model and its columns, and writes an add-only migration.
 - The token decides the environment: `vf_test_` is Test (AEAT pre-production), `vf_prod_` is Live. Each database (each developer, staging, production) needs its own app and token on the service.
+- Test checks no tax ID (checks answer `NotChecked`, invoices are never refused with `recipient_not_identified`; a malformed tax ID is still refused). Live numbers its invoices apart from Test: an app continuing another system's numbering this year asks the service's administrator to set Live's next invoice number before its first Live invoice.
 - The columns (`config('verifactu.columns')`) must exist before the first send. The status column is cast to `Vlec\Verifactu\InvoiceStatus`.
 - The jobs need a real queue (`database`, `redis`) outside tests.
 - Schedule the catch-up for missed webhooks in `routes/console.php`: `Schedule::command('verifactu:refresh-pending')->hourly();`
@@ -116,7 +117,7 @@ $request->validate([
 ]);
 ```
 
-Put the rule last, after `bail`. The name field is top-level or a fixed dotted path, never a wildcard. For a direct check: `Verifactu::checkTaxId($taxId, $name)` returns a `TaxIdCheck` (`result`, `officialName`).
+Put the rule last, after `bail`. The name field is top-level or a fixed dotted path, never a wildcard. For a direct check: `Verifactu::checkTaxId($taxId, $name)` returns a `TaxIdCheck` (`result`, `officialName`). In Test a well-formed tax ID answers `NotChecked` and the rule passes it.
 
 ### 6. Test
 
@@ -136,7 +137,8 @@ expect($invoice->fresh()->verifactu_status)->toBe(InvoiceStatus::Accepted);
 
 - Run the jobs on the `sync` queue; don't `Queue::fake()` them. Call `Verifactu::fake()` before any catch-all `Http::fake()`.
 - `decide($invoice, InvoiceStatus::Rejected, errorCode: '1105')` plays AEAT's answer.
-- `taxIdCheck(TaxIdCheckResult::NotIdentified)` makes tax-ID checks, and issuing to a Spanish tax ID, fail as the service does.
+- By default a tax-ID check answers as the service does in the token's environment: `NotChecked` with a `vf_test_` token, `Identified` with a `vf_prod_` one.
+- `taxIdCheck(TaxIdCheckResult::NotIdentified)` makes tax-ID checks, and issuing to a Spanish tax ID, fail as the service does in Live. It works with any token, so a Test token can still try a refused customer.
 - Assertions: `assertIssued`, `assertNothingIssued`, `assertBatchSent`, `assertCorrected`, `assertCancelled`.
 
 ## Rules, References, and Templates

@@ -40,7 +40,7 @@ Run the wizard once the invoice model's table is migrated:
 
 1. Publishes `config/verifactu.php`.
 2. Adds `VERIFACTU_URL`, `VERIFACTU_TOKEN` and `VERIFACTU_WEBHOOK_SECRET`, empty, to `.env` and `.env.example`. A key already set keeps its value.
-3. Asks which model is the invoice, and which of its columns already hold the number, date, status and QR code.
+3. Asks which model is the invoice, and which of its columns already hold each of the seven [fields](#configuration): the uuid, status, invoice number, number, issue date, verification URL and QR code.
 4. Writes those choices into the config, and a migration that adds only the missing columns. It also publishes the migration of the package's own `verifactu_invoice_batches` table.
 5. Lists the columns of an earlier AEAT setup of your own (a hash, a chain, XML), which the service keeps now, and prints a migration to drop them if you want to. It never drops anything.
 6. Prints the lines to add to the model, the schedule line and the webhook URL.
@@ -62,6 +62,11 @@ VERIFACTU_WEBHOOK_SECRET=whsec_...
 ```
 
 An administrator of the service gives you these on your app's page, under Apps. The token decides the environment: a `vf_test_` token works in Test (AEAT's pre-production), a `vf_prod_` token in Live.
+
+The same code runs in both, but two things differ:
+
+- **Test checks no tax ID.** AEAT has no checker in pre-production, so a [tax-ID check](#tax-id-checks) answers `NotChecked` and an invoice is never refused as unknown to AEAT (`recipient_not_identified`). A tax ID AEAT doesn't know under that name shows up only in Live. A malformed one is refused in both.
+- **Live has its own numbering.** Test and Live number their invoices apart. If your app already issued invoices this year from another system, ask the administrator to set Live's next invoice number before your first Live invoice, so the numbering carries on.
 
 Give each database its own app and token on the service: each developer, staging and production. The package finds an invoice on the service by its model key (`invoice:42`), so two databases sharing a token would both claim `invoice:1`.
 
@@ -340,6 +345,8 @@ $check->result;       // TaxIdCheckResult::Identified, Similar, NotIdentified, D
 $check->officialName; // the name AEAT holds, when the result is Similar
 ```
 
+In Test a well-formed tax ID always answers `NotChecked`: AEAT has no checker in pre-production, so invoices skip the check too.
+
 Or validate a form with the `KnownToAeat` rule, naming the field that holds the customer's name:
 
 ```php
@@ -353,7 +360,7 @@ $request->validate([
 
 - It refuses a tax ID AEAT doesn't know under that name, or knows as deregistered or revoked, and one the service finds malformed.
 - When AEAT holds a similar name, it fails on the name field, with the official name.
-- When AEAT or the service can't answer, it passes: the invoice is checked again when it is issued. A refusal that isn't an outage, such as a refused token, passes too, and is reported.
+- When AEAT or the service can't answer, it passes: the invoice is checked again when it is issued. In Test, where AEAT checks nothing, it passes any well-formed tax ID. A refusal that isn't an outage, such as a refused token, passes too, and is reported.
 - Put it last, after `bail`, so it calls the service only once the rest of the field is valid. Other fields' rules don't stop it.
 - The name field is a top-level field, or a fixed dotted one (`customer.legal_name`). A wildcard (`customers.*.legal_name`) checks nothing.
 
@@ -419,7 +426,8 @@ it('issues the invoice and stores AEAT\'s acceptance', function () {
 
 - The jobs must run inside the test, on the `sync` queue (the default in `phpunit.xml`), not with `Queue::fake()`. Call `Verifactu::fake()` before any catch-all `Http::fake()`.
 - `decide($invoice, $status, errorCode: '1105', errorMessage: '…')` plays AEAT's answer, as a webhook would: `Accepted`, `AcceptedWithErrors` or `Rejected`, or `Cancelled` after `cancelOnVerifactu()`.
-- `taxIdCheck(TaxIdCheckResult::NotIdentified)` sets the answer to every later tax-ID check (`Similar` takes the official name too). With `NotIdentified`, issuing to a Spanish tax ID is refused with `recipient_not_identified`, as the service does.
+- A tax-ID check answers as the service does in the token's environment: `NotChecked` with a `vf_test_` token (the fake's own token, used when none is set), `Identified` with a `vf_prod_` one. Issuing is never refused with `recipient_not_identified`.
+- `taxIdCheck(TaxIdCheckResult::NotIdentified)` sets the answer to every later tax-ID check (`Similar` takes the official name too). With `NotIdentified`, issuing to a Spanish tax ID is refused with `recipient_not_identified`, as the service does in Live. It works with any token, so your tests can try a refused customer without a Live token, although the service in Test never gives that answer.
 - Assertions: `assertIssued($invoice, ?fn (array $body): bool)`, `assertNothingIssued()`, `assertBatchSent()`, `assertCorrected($invoice)` and `assertCancelled($invoice)`.
 
 ```php

@@ -179,9 +179,31 @@ it('answers tax-ID checks as the test sets: :dataset', function (Closure $settin
 
     expect(checkCustomer())->toBe($errors);
 })->with([
-    'identified, the default' => [fn (VerifactuFake $fake): VerifactuFake => $fake, []],
+    'not checked in Test, the default' => [fn (VerifactuFake $fake): VerifactuFake => $fake, []],
     'not identified' => [fn (VerifactuFake $fake): VerifactuFake => $fake->taxIdCheck(TaxIdCheckResult::NotIdentified), ['tax_id' => ['AEAT does not accept this tax ID with this name.']]],
     'similar' => [fn (VerifactuFake $fake): VerifactuFake => $fake->taxIdCheck(TaxIdCheckResult::Similar, 'ACME SOCIEDAD LIMITADA'), ['legal_name' => ['AEAT holds this tax ID as: ACME SOCIEDAD LIMITADA']]],
+]);
+
+it('answers tax-ID checks as the service does in the token\'s environment: :dataset', function (string $token, TaxIdCheckResult $result): void {
+    config(['verifactu.token' => $token]);
+    Verifactu::fake();
+
+    expect(Verifactu::checkTaxId('A15022510', 'Acme S.L.')->result)->toBe($result);
+})->with([
+    'Test, where AEAT has no checker' => ['vf_test_token-for-tests', TaxIdCheckResult::NotChecked],
+    'Live' => ['vf_prod_token-for-tests', TaxIdCheckResult::Identified],
+]);
+
+it('plays the tax-ID answer the test sets with any token: :dataset', function (string $token): void {
+    config(['verifactu.token' => $token]);
+    Verifactu::fake()->taxIdCheck(TaxIdCheckResult::Similar, 'ACME SOCIEDAD LIMITADA');
+
+    expect(Verifactu::checkTaxId('A15022510', 'Acme S.L.'))
+        ->result->toBe(TaxIdCheckResult::Similar)
+        ->officialName->toBe('ACME SOCIEDAD LIMITADA');
+})->with([
+    'Test' => ['vf_test_token-for-tests'],
+    'Live' => ['vf_prod_token-for-tests'],
 ]);
 
 it('keeps the tax-ID answer for every later check', function (): void {
@@ -340,6 +362,16 @@ it('passes assertNothingIssued when nothing was sent', function (): void {
 
     Verifactu::assertNothingIssued();
 });
+
+it('issues to any Spanish customer until the test sets the tax-ID answer: :dataset', function (string $token): void {
+    config(['verifactu.token' => $token]);
+    Verifactu::fake();
+
+    expect(Verifactu::createInvoice(sale()))->toHaveKey('uuid');
+})->with([
+    'Test' => ['vf_test_token-for-tests'],
+    'Live' => ['vf_prod_token-for-tests'],
+]);
 
 it('refuses to issue to a customer AEAT does not know, as the service does', function (): void {
     Event::fake([InvoiceNotIssued::class]);
@@ -788,7 +820,7 @@ it('ignores an Idempotency-Key on the requests that take none', function (): voi
     $check = Verifactu::http()->withHeaders($key)->post('tax-id-checks', ['tax_id' => '12345678Z', 'name' => 'Ana Pérez']);
     $list = Verifactu::http()->withHeaders($key)->get('invoices');
 
-    expect($check->json('data'))->toBe(['tax_id' => '12345678Z', 'result' => 'identified', 'official_name' => null])
+    expect($check->json('data'))->toBe(['tax_id' => '12345678Z', 'result' => 'not_checked', 'official_name' => null])
         ->and($list->status())->toBe(200);
 });
 
@@ -1134,7 +1166,7 @@ it('reads a batch\'s items 100 a page, from the first: :dataset', function (stri
 it('accepts a valid Spanish tax ID: :dataset', function (string $taxId): void {
     Verifactu::fake();
 
-    expect(Verifactu::checkTaxId($taxId, 'Acme S.L.')->result)->toBe(TaxIdCheckResult::Identified);
+    expect(Verifactu::checkTaxId($taxId, 'Acme S.L.')->result)->toBe(TaxIdCheckResult::NotChecked);
 })->with([
     'a company, digit control' => ['A15022510'],
     'a company with a nine where digits count twice' => ['A91234567'],
