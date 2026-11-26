@@ -20,7 +20,7 @@
     "require": {
         "php": "^8.4",
         "ext-bcmath": "*",
-        "laravel/framework": "^13.44",
+        "laravel/framework": "^13.43",
         "laravel/prompts": "^0.3"
     },
     "require-dev": {

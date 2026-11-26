@@ -25,7 +25,7 @@ This package is built for the company's own apps.
 ## Requirements
 
 - PHP 8.4+ with `ext-bcmath`
-- Laravel 13.44+
+- Laravel 13.43+
 - A queue worker on a real queue connection, such as `database` or `redis`
 - An app on the Verifactu service: its API token and webhook signing secret
 
@@ -474,7 +474,7 @@ Until `1.0.0`, a minor version (`0.2` → `0.3`) may change the public API: requ
     - Stop sending invoices, and pause the scheduled `verifactu:refresh-pending`. Webhooks still queue `RefreshInvoice` and `ApplyInvoiceBatch`, so keep the gap short.
     - Let your workers finish the package's jobs (`IssueInvoice`, `SendInvoiceBatch`, `RefreshInvoice`, `ApplyInvoiceBatch`), including the ones released to wait for a retry. Do it before `php artisan down`: in maintenance mode, workers take no jobs unless they run with `--force`.
     - Retry or delete the package's failed jobs before the upgrade. A 0.1 job retried with `queue:retry` afterwards keeps its old payload.
-2. **Laravel 13.44 or later.** Upgrade Laravel, then require the package:
+2. **Laravel 13.43 or later.** Upgrade Laravel, then require the package:
 
     ```bash
     composer require vlec/laravel-verifactu:^0.2
