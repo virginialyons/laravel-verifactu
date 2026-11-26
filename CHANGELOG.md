@@ -2,6 +2,14 @@
 
 All notable changes to `vlec/laravel-verifactu` are recorded here. Each release's notes are added when it is published on GitHub.
 
+## v0.2.2 - 2026-11-26
+
+The package now installs on Laravel 13.43.
+
+- **Requirements:** Laravel 13.43 or later (was 13.44). The package's full checks pass on 13.43.0. It needs `releaseUsingBackoff()`, added in 13.43.0, so 13.42 and older are still not supported.
+
+There is no API change, no new migration and no new config key.
+
 ## v0.2.1 - 2026-11-25
 
 `Verifactu::fake()` now answers tax-ID checks the way the Verifactu service does in each environment.
@@ -68,6 +76,7 @@ The token decides the environment: a `vf_test_` token issues in Test, a `vf_prod
 ```bash
 composer require vlec/laravel-verifactu:^0.1
 php artisan verifactu:install
+
 
 ```
 Until `1.0.0`, a minor version may change the public API. Read the [README](https://github.com/virginialyons/laravel-verifactu#readme) for the full guide.
